@@ -115,3 +115,5 @@ button { font-family: inherit; cursor: pointer; border: none; }
 #fade { position: fixed; inset: 0; z-index: 50; background: #1a1630; opacity: 0; pointer-events: none; transition: opacity .8s;
   display: flex; align-items: center; justify-content: center; color: #fff; font-size: 30px; }
 #fade.on { opacity: 1; pointer-events: auto; }
+#weather-icon { margin-left: 6px; }
+.cat-item.pet-home { background: #fff3d6; }
