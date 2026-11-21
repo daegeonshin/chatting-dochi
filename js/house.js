@@ -30,7 +30,7 @@ function viewTexture() {
   return viewTex;
 }
 
-export function makeFurniture(id, color = 0xffb3c8) {
+export function makeFurniture(id, color = 0xffb3c8, data = {}) {
   const g = new THREE.Group();
   let r = 0.6, walk = false, spot = null;
   const wood = 0xc8905a, dark = new THREE.Color(color).multiplyScalar(0.8).getHex();
@@ -198,6 +198,33 @@ export function makeFurniture(id, color = 0xffb3c8) {
       spot = { x: 0, y: 0.08, z: 0 };
       r = 0.55; break;
     }
+    case 'sapling': {
+      if (!data.grown) {
+        // 새싹 : 물을 주면 자람
+        cyl(0.28, 0.22, 0.35, color, 0, 0.17, 0);
+        cyl(0.25, 0.25, 0.04, 0x7a5030, 0, 0.35, 0);
+        cyl(0.02, 0.025, 0.25 + (data.water || 0) * 0.1, 0x5fae4c, 0, 0.45 + (data.water || 0) * 0.05, 0, 5);
+        const top = 0.58 + (data.water || 0) * 0.1;
+        for (const s2 of [-1, 1]) { const lf = sph(0.09 + (data.water || 0) * 0.02, 0x7fcf62, 0.08 * s2, top, 0); lf.scale.set(1.4, 0.5, 0.8); lf.rotation.z = 0.4 * s2; }
+        spot = { x: 0, y: top + 0.1, z: 0 };
+        r = 0.35;
+      } else {
+        cyl(0.4, 0.32, 0.45, color, 0, 0.22, 0);
+        cyl(0.36, 0.36, 0.04, 0x7a5030, 0, 0.45, 0);
+        cyl(0.08, 0.12, 1.3, 0x9a6a44, 0, 1.1, 0, 8);
+        sph(0.62, 0x6fc35f, 0, 2.0, 0).scale.set(1, 0.85, 1);
+        sph(0.4, 0x5fb34f, 0.35, 1.75, 0.2);
+        sph(0.38, 0x7fcf62, -0.3, 1.85, -0.2);
+        spot = { x: 0, y: 2.5, z: 0 };
+        if (data.nest) {
+          const ring = mesh(new THREE.TorusGeometry(0.26, 0.09, 8, 16), 0x8a5a3a); ring.rotation.x = Math.PI / 2; ring.position.set(0, 2.5, 0); g.add(ring);
+          cyl(0.24, 0.16, 0.1, 0x7a5030, 0, 2.45, 0, 12);
+          spot = { x: 0, y: 2.5, z: 0 };
+        }
+        r = 0.55;
+      }
+      break;
+    }
     case 'nest': {
       cyl(0.32, 0.25, 0.25, 0xc8905a, 0, 0.12, 0, 12);
       const ring = mesh(new THREE.TorusGeometry(0.36, 0.13, 8, 18), 0x9a6a44); ring.rotation.x = Math.PI / 2; ring.position.y = 0.32; g.add(ring);
@@ -297,7 +324,7 @@ export class House {
   }
 
   addItem(f, isNew = true) {
-    const g = makeFurniture(f.id, f.color);
+    const g = makeFurniture(f.id, f.color, f);
     outline(g, 0.018, 0x4a3048, 0.06); castAll(g, GFX.level === 'high', false);
     g.position.set(f.x, 0, f.z); g.rotation.y = f.rot || 0;
     g.userData.data = f;
@@ -313,6 +340,13 @@ export class House {
     this.saveData.furniture = this.saveData.furniture.filter(f => f !== g.userData.data);
     this.ctx.onSave();
     return true;
+  }
+  // 모양이 바뀌면 (작은 나무가 자람 등) 다시 만들기
+  rebuild(g) {
+    const d = g.userData.data;
+    this.furnGroup.remove(g);
+    this.items = this.items.filter(i => i !== g);
+    return this.addItem(d, false);
   }
   recolor(g, color) {
     const d = g.userData.data;

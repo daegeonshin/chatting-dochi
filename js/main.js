@@ -13,6 +13,9 @@ import { HomeBirds } from './homebirds.js';
 import { makeEgg } from './wildlife.js';
 import { PET_HOMES, homeFor } from './data.js';
 import { uid } from './save.js';
+import { BerryTrees, makeBerryMesh, BERRY_NAMES } from './berries.js';
+import { Baseball, MINI_GAMES } from './minigames.js';
+import { SAPLING_WATER, MAGPIE_COLORS } from './data.js';
 import { Wildlife } from './wildlife.js';
 import { Floaters, clamp, lerp, angleLerp } from './utils.js';
 import { sfx, unlockAudio } from './audio.js';
@@ -123,6 +126,7 @@ function startGame() {
   G.forest = new THREE.Scene();
   G.world = new World(G.forest, S.profile);
   G.world.setWindows(S.windows);
+  G.berries = new BerryTrees(G.world, S);
   G.weather = new Weather(G.forest);
   G.weather.onChange = k => { const w = WEATHERS[k]; toast(`${w.icon} 날씨가 바뀌었어요 : ${w.name}`); };
   G.dn = new DayNight(G.forest, G.world, S.clock);
@@ -296,6 +300,32 @@ function sleep() {
   }, 1300);
 }
 
+// 열매를 들고 까치를 톡 → 까치 색이 열매 색으로 (흰 무늬는 그대로)
+function useBerryOn(applyFn, name) {
+  const c = G.carry;
+  const color = c.data.color;
+  if (c.obj.parent) c.obj.parent.remove(c.obj);
+  G.carry = null; G.avatar.holding = false;
+  applyFn(color);
+  sfx.happy();
+  toast(`✨ ${name}(이)가 ${BERRY_NAMES[color]}색 까치가 되었어요!`, 3200);
+  refreshButtons(); persist();
+}
+
+// 작은 나무에 물 주기
+function waterSapling(item) {
+  const d = item.userData.data;
+  if (d.grown) { toast('작은 나무가 튼튼하게 자랐어요 🌳 까치 두 마리가 있으면 둥지를 틀어요'); return; }
+  const now = Date.now();
+  if (d.lastWater && now - d.lastWater < 8000) { toast('물이 땅에 스며들고 있어요. 조금 있다가 또 줘요 💧'); return; }
+  d.water = (d.water || 0) + 1; d.lastWater = now;
+  for (let i = 0; i < 4; i++) setTimeout(() => G.floatH.add('💧', item.position.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.5, 1.1, (Math.random() - 0.5) * 0.5)), 0.4), i * 120);
+  sfx.place();
+  if (d.water >= SAPLING_WATER) { d.grown = true; G.house.rebuild(item); sfx.happy(); toast('🌳 새싹이 작은 나무로 자랐어요!', 3200); }
+  else { G.house.rebuild(item); toast(`💧 물을 줬어요 (${d.water}/${SAPLING_WATER})`); }
+  persist();
+}
+
 // ───────── 안고 다니기 ─────────
 // G.carry : { kind: 'pet', pet } | { kind: 'wild', obj, data } | { kind: 'home', obj, view } | { kind: 'egg', obj, data }
 function pickUp(c) {
@@ -331,6 +361,11 @@ function dropCarry() {
     const nest = nearestNest();
     if (!nest) { toast('둥지가 없어요. 꾸미기에서 🪺 둥지를 놓아 주세요'); return; }
     placeEgg(nest); return;
+  }
+  if (c.kind === 'berry') {
+    if (c.obj.parent) c.obj.parent.remove(c.obj);
+    G.carry = null; G.avatar.holding = false; sfx.place();
+    toast('열매를 내려놓았어요'); refreshButtons(); return;
   }
   const at = frontSpot();
   if (c.kind === 'pet') {
@@ -382,7 +417,7 @@ function refreshButtons() {
   const sp = $('btn-special');
   const wk = G.pets && mainWalker();
   $('btn-drop').style.display = G.carry ? '' : 'none';
-  if (G.carry) $('btn-drop').textContent = G.carry.kind === 'egg' ? '🪺 둥지에 놓기' : '⬇️ 내려놓기';
+  if (G.carry) $('btn-drop').textContent = G.carry.kind === 'egg' ? '🪺 둥지에 놓기' : G.carry.kind === 'berry' ? '⬇️ 열매 버리기' : '⬇️ 내려놓기';
   if (wk && G.mode === 'forest') { sp.style.display = ''; sp.textContent = wk.specialLabel(); sp.style.width = 'auto'; sp.style.padding = '0 14px'; sp.style.borderRadius = '29px'; sp.style.fontSize = '16px'; }
   else sp.style.display = 'none';
 }
@@ -538,6 +573,30 @@ async function renameBird(b) {
   if (name) { G.birds.rename(b, name); toast(`이제 이름은 ${name}!`); }
 }
 
+// 미니게임
+onPress($('btn-game'), () => openPanel('🎮 미니게임', body => {
+  const grid = el('div', 'grid');
+  MINI_GAMES.forEach(gm => {
+    const best = (S.best && S.best[gm.id]) || 0;
+    const card = el('div', 'card', `<div class="emo">${gm.emo}</div><div>${gm.name}</div><small>${gm.desc}</small><small>🏆 최고 ${best}점</small>`);
+    card.onclick = () => { closePanel(); startMini(gm.id); };
+    grid.appendChild(card);
+  });
+  body.appendChild(grid);
+}));
+function startMini(id) {
+  if (id !== 'baseball') return;
+  if (!S.best) S.best = {};
+  G.paused = true;
+  const root = $('mini'); root.classList.remove('hidden');
+  const shirt = '#' + ((COLORS7.find(c => c.id === S.profile.cloth) || COLORS7[2]).hex).toString(16).padStart(6, '0');
+  new Baseball(root, {
+    best: S.best.baseball || 0, shirt,
+    onEnd: score => { S.best.baseball = Math.max(S.best.baseball || 0, score); persist(); },
+    onExit: () => { root.classList.add('hidden'); G.paused = false; },
+  });
+}
+
 // 창문 (집 안에서)
 onPress($('btn-window'), () => windowPanel());
 const WIN_NAMES = { fl: '문 왼쪽 창문', fr: '문 오른쪽 창문', l: '왼쪽 벽 창문', r: '오른쪽 벽 창문', b: '뒤쪽 벽 창문' };
@@ -644,6 +703,7 @@ function setDeco(on) {
   $('deco-edit').classList.toggle('hidden', !on);
   if (!on && G.house) G.house.select(null);
   $('btn-jump').parentElement.style.visibility = on ? 'hidden' : '';
+  $('btn-game').style.visibility = on ? 'hidden' : '';
 }
 onPress($('btn-deco'), () => { setDeco(true); toast('가구를 골라 놓고, 끌어서 옮겨요'); });
 onPress($('btn-deco-done'), () => { setDeco(false); persist(); toast('예쁘게 꾸몄어요! 💕'); });
@@ -679,7 +739,8 @@ input.handlers.tap = (x, y) => {
       if (G.carry && G.carry.kind === 'egg') targets.push(...G.house.items.filter(i => i.userData.kind === 'nest'));
     }
     if (G.deco) targets.push(...G.house.items);
-  } else { wildRoots = G.wild.tapTargets(); targets.push(...wildRoots); }
+  } else { wildRoots = [...G.wild.tapTargets(), ...G.berries.tapTargets()]; targets.push(...wildRoots); }
+  if (G.mode === 'house' && !G.deco) targets.push(...G.house.items.filter(i => i.userData.kind === 'sapling'));
   const now = performance.now();
   // 두 번째 톡은 동물이 움직여도 같은 자리면 같은 대상으로
   let o, dbl = false;
@@ -703,12 +764,28 @@ input.handlers.tap = (x, y) => {
   if (birdRoots.includes(o)) {
     const v = G.birds.viewOfRoot(o);
     if (!v) return;
+    if (G.carry && G.carry.kind === 'berry' && v.b.kind === 'magpie' && v.b.stage !== 'egg') { useBerryOn(col => G.birds.dye(v.b, col), v.b.name || '까치'); return; }
     if (v.b.stage === 'egg') { toast(`아기 까치가 태어나기까지 ${Math.max(1, Math.ceil(10 - (Date.now() - v.b.placedAt) / 60000))}분 남았어요 🥚`); return; }
     if (dbl) { if (pickUp({ kind: 'home', obj: v.root, view: v })) { G.birds.take(v); toast(`${v.b.name || '새'}(을)를 안았어요 🤗`); } }
     else { sfx.tweet(0.06); G.floatH.add('💗', v.root.position.clone().add(new THREE.Vector3(0, 0.6, 0)), 0.4); }
     return;
   }
   if (wildRoots.includes(o)) {
+    if (o.userData.berry) {
+      if (!near(o.getWorldPosition(new THREE.Vector3()), 6)) { toast('열매 나무에 조금 더 가까이 가요'); return; }
+      if (G.carry) { toast('먼저 들고 있는 걸 내려놓아요'); return; }
+      const color = G.berries.pick(o);
+      if (!color) return;
+      const bm = makeBerryMesh(color); G.forest.add(bm);
+      pickUp({ kind: 'berry', obj: bm, data: { color } });
+      toast(`${BERRY_NAMES[color]} 열매를 땄어요! 까치를 톡 누르면 까치 색이 바뀌어요`, 3500);
+      persist();
+      return;
+    }
+    if (G.carry && G.carry.kind === 'berry' && G.wild.magpies.some(m => m.m === o)) {
+      if (!near(o.position, 8)) { toast('까치에게 조금 더 가까이 가요'); return; }
+      useBerryOn(col => G.wild.dye(o, col), '까치'); return;
+    }
     if (o.userData.wildEgg) {
       if (!near(o.getWorldPosition(new THREE.Vector3()), 8)) { toast('알에 조금 더 가까이 가요'); return; }
       if (G.carry) { toast('먼저 들고 있는 걸 내려놓아요'); return; }
@@ -734,6 +811,7 @@ input.handlers.tap = (x, y) => {
   if (G.deco) { G.house.select(o); return; }
   if (o && o.userData.kind === 'nest' && G.carry && G.carry.kind === 'egg') { placeEgg(o); return; }
   if (o && o.userData.win) { toggleWindowTap(o.userData.win); return; }
+  if (o && o.userData.kind === 'sapling') { waterSapling(o); return; }
   if (o && o.userData.kind === 'bed') sleep();
 };
 input.handlers.longpress = (x, y) => {
@@ -785,6 +863,7 @@ let clockTick = 0;
 
 function frame() {
   requestAnimationFrame(frame);
+  if (G.paused) { clock.getDelta(); return; } // 미니게임 중에는 숲을 멈춤
   const dt = Math.min(clock.getDelta(), 0.05);
   G.t += dt;
   const look = input.takeLook();
@@ -812,6 +891,7 @@ function frame() {
     p.update(dt, mv, G.camYaw, G.world);
     pushFromAnimals(G.forest, G.wild.groundCircles());
     G.world.update(dt, G.t, night);
+    G.berries.update(dt, G.t);
     G.wild.update(dt, p);
     updateCarry();
     G.floatF.update(dt);
@@ -919,14 +999,22 @@ function canopyClear() {
   for (const tr of G.world.trees) {
     if (Math.abs(tr.x - c.x) > 5 || Math.abs(tr.z - c.z) > 5) continue;
     if (!inCanopy(tr, c.x, c.y, c.z)) continue;
-    // 플레이어 쪽으로 반씩 좁혀 가며 잎 밖 지점 찾기
+    if (tr.type !== 'pine') {
+      // 둥근 나무 : 잎 아래로 카메라를 내림 (나무 밑에서 올려다보기)
+      const rx = tr.cr * 1.15, ry = tr.cry * 1.15;
+      const hx = (c.x - tr.x) / rx, hz = (c.z - tr.z) / rx;
+      const under = tr.y + tr.cy - ry * Math.sqrt(Math.max(0, 1 - hx * hx - hz * hz)) - 0.25;
+      const gy = height(c.x, c.z) + 0.5;
+      if (under > gy) { c.y = under; continue; }
+    }
+    // 소나무나 너무 낮은 잎 : 플레이어 쪽으로 당기되 너무 가깝지 않게
     let lo = 0, hi = 1;
     for (let i = 0; i < 8; i++) {
       const m = (lo + hi) / 2;
       _cv.lerpVectors(camTarget, c, m);
       if (inCanopy(tr, _cv.x, _cv.y, _cv.z)) hi = m; else lo = m;
     }
-    c.lerpVectors(camTarget, c.clone(), Math.max(0.15, lo * 0.95));
+    c.lerpVectors(camTarget, c.clone(), Math.max(0.5, lo * 0.95));
   }
 }
 function setContext(c) {
@@ -946,4 +1034,4 @@ frame();
 if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('sw.js').catch(() => {});
 
 // 테스트용 핸들 (개발자 도구에서 사용)
-window.__T = { camera, input, G, S, startWalk, endWalk, enterHouse, exitHouse, sleep, createPet, persist, pickUp, dropCarry, applyWindowState, sparrowVisit };
+window.__T = { waterSapling, startMini, camera, input, G, S, startWalk, endWalk, enterHouse, exitHouse, sleep, createPet, persist, pickUp, dropCarry, applyWindowState, sparrowVisit };

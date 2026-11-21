@@ -18,6 +18,11 @@ function tone({ f0, f1 = f0, dur = 0.15, type = 'sine', vol = 0.2, delay = 0 }) 
   o.start(t); o.stop(t + dur + 0.02);
 }
 export const sfx = {
+  bat: () => { tone({ f0: 1400, f1: 300, dur: 0.12, type: 'square', vol: 0.12 }); tone({ f0: 180, f1: 90, dur: 0.15, type: 'triangle', vol: 0.15 }); },
+  swish: () => tone({ f0: 700, f1: 200, dur: 0.18, type: 'sawtooth', vol: 0.04 }),
+  homerun: () => { [523, 659, 784, 1047, 1319].forEach((f, i) => tone({ f0: f, dur: 0.18, type: 'triangle', vol: 0.12, delay: i * 0.1 })); },
+  out: () => { tone({ f0: 330, f1: 220, dur: 0.25, type: 'triangle', vol: 0.12 }); tone({ f0: 220, f1: 160, dur: 0.3, type: 'triangle', vol: 0.1, delay: 0.2 }); },
+  pitch: () => tone({ f0: 300, f1: 600, dur: 0.12, type: 'sine', vol: 0.06 }),
   click: () => tone({ f0: 880, f1: 1200, dur: 0.06, vol: 0.08 }),
   jump: () => tone({ f0: 330, f1: 660, dur: 0.16, type: 'triangle', vol: 0.15 }),
   jump2: () => tone({ f0: 520, f1: 1040, dur: 0.2, type: 'triangle', vol: 0.15 }),

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { makeMagpie, makeSparrow, makeEgg, poseMagpie } from './wildlife.js';
 import { makeLabel, rand, pick, angleLerp } from './utils.js';
-import { EGG_HATCH_MIN, MAGPIE_GROW_MIN } from './data.js';
+import { EGG_HATCH_MIN, MAGPIE_GROW_MIN, HOME_LAY_MIN, breedColor } from './data.js';
 import { uid } from './save.js';
 import { sfx } from './audio.js';
 
@@ -75,6 +75,38 @@ export class HomeBirds {
     v.root.position.set(p.x + (i - (eggsHere.length - 1) / 2) * 0.18, p.y + 0.08, p.z + (i % 2) * 0.06);
   }
   rename(b, name) { b.name = name; this.drop(b); this.ctx.onSave(); }
+  dye(b, color) { b.color = color; this.drop(b); this.ctx.onSave(); }
+
+  // 다 자란 작은 나무 + 어른 까치 두 마리 → 둥지를 틀고 알을 낳음
+  breed() {
+    const adults = this.S.birds.filter(b => b.kind === 'magpie' && !b.guest && b.stage === 'adult' && !b.away);
+    if (adults.length < 2) return;
+    const trees = this.house.items.filter(i => i.userData.kind === 'sapling' && i.userData.data.grown);
+    const now = Date.now();
+    for (const tr of trees) {
+      const d = tr.userData.data;
+      if (this.S.birds.some(b => b.stage === 'egg' && b.nest === d.uid)) continue;
+      if (!d.nest) {
+        d.nest = true; d.lastLay = now - (HOME_LAY_MIN - 1) * 60000; // 둥지를 틀고 1분 뒤 알
+        this.house.rebuild(tr); this.ctx.onSave();
+        this.say('🪺 까치들이 작은 나무에 둥지를 틀었어요!');
+        return;
+      }
+      if (now - (d.lastLay || 0) < HOME_LAY_MIN * 60000) continue;
+      d.lastLay = now;
+      const a = adults[Math.floor(Math.random() * adults.length)];
+      const others = adults.filter(x => x !== a);
+      const b = others[Math.floor(Math.random() * others.length)];
+      const cnt = 1 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < cnt; i++) this.S.birds.push({ uid: uid(), kind: 'magpie', color: breedColor(a.color, b.color), name: '', stage: 'egg', placedAt: now, nest: d.uid, parents: [a.uid, b.uid] });
+      this.ctx.onSave();
+      const an = a.name || '까치', bn = b.name || '까치';
+      const wa = (an.charCodeAt(an.length - 1) - 0xac00) % 28 ? '과' : '와';
+      this.say(`🥚 ${an}${wa} ${bn}(이)가 알을 ${cnt}개 낳았어요! 10분 뒤에 태어나요`);
+      return;
+    }
+  }
+  say(msg) { if (this.ctx.inHouse()) this.ctx.toast(msg, 3500); else this.pending = (this.pending || []).concat([msg]); }
 
   tapTargets() { return [...this.views.values()].filter(v => v.state !== 'carried').map(v => v.root); }
   viewOfRoot(root) { return [...this.views.values()].find(v => v.root === root); }
@@ -100,6 +132,7 @@ export class HomeBirds {
     if (this.checkT <= 0) {
       this.checkT = 2;
       this.grow();
+      this.breed();
       // 날아간 까치가 가끔 창가로 돌아옴 (창문이 열려 있으면 들어옴)
       for (const b of this.S.birds) {
         if (!b.away) continue;

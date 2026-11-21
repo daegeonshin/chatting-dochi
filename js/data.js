@@ -63,6 +63,7 @@ export const FURNITURE = [
   { id: 'clock', name: '괘종시계', emo: '🕰️' },
   { id: 'cushion', name: '방석', emo: '🟪' },
   { id: 'cake', name: '케이크', emo: '🎂' },
+  { id: 'sapling', name: '작은 나무', emo: '🌱' },
 ];
 export const FURN_COLORS = [0xffb3c8, 0x8fd3ff, 0xc9a7ff, 0xffd84d, 0x8fdc8f, 0xffffff, 0xc89060];
 
@@ -76,7 +77,7 @@ export const PET_HOMES = [
   { id: 'birdcage', name: '새장', emo: '🦜', for: ['parrot'] },
   { id: 'grasscage', name: '잔디 케이지', emo: '🐰', for: ['rabbit', 'redpanda'] },
   { id: 'doghouse', name: '개집', emo: '🐶', for: ['dog'] },
-  { id: 'slothtree', name: '작은 나무', emo: '🦥', for: ['sloth'] },
+  { id: 'slothtree', name: '나무늘보 나무', emo: '🦥', for: ['sloth'] },
   { id: 'chickbox', name: '병아리 상자', emo: '🐥', for: ['chick'] },
   { id: 'nest', name: '둥지', emo: '🪺', for: ['magpie'] },
 ];
@@ -94,3 +95,23 @@ export const MAGPIE_COLORS = {
 // 시간 (분)
 export const EGG_HATCH_MIN = 10;   // 둥지에 둔 까치 알이 깨기까지
 export const MAGPIE_GROW_MIN = 15; // 아기 까치가 어른이 되기까지
+
+// 열매 색 (숲의 열매 나무)
+export const BERRY_COLORS = ['green', 'blue', 'white', 'yellow', 'pink', 'purple', 'red'];
+export const BERRY_REGROW_MIN = 5;
+export const SAPLING_WATER = 3;     // 작은 나무가 자라려면 물 주는 횟수
+export const HOME_LAY_MIN = 8;      // 집 까치가 다시 알을 낳기까지
+
+// 까치 교배 색 (따님이 정한 규칙, 정해지지 않은 조합은 엄마 아빠 중 하나)
+export function breedColor(a, b) {
+  if (a === b) return a;
+  const has = (x, y) => (a === x && b === y) || (a === y && b === x);
+  if (has('yellow', 'green')) return 'lime';
+  if (has('blue', 'white')) return 'sky';
+  if (has('pink', 'white')) return 'lightpink';
+  if (has('purple', 'white')) return 'lavender';
+  if (has('black', 'white')) return 'gray';
+  if (has('sky', 'gray')) return 'teal';
+  if (has('teal', 'white')) return 'mint';
+  return Math.random() < 0.5 ? a : b;
+}

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { mesh, rand, pick, angleLerp } from './utils.js';
 import { outline } from './look.js';
 import { POND, WATER_Y, WORLD_R, VILLAGE, MEADOW, height, inPond } from './world.js';
-import { MAGPIE_COLORS } from './data.js';
+import { MAGPIE_COLORS, breedColor } from './data.js';
 import { sfx } from './audio.js';
 
 const S = (r, w = 10, h = 8) => new THREE.SphereGeometry(r, w, h);
@@ -447,7 +447,7 @@ export class Wildlife {
     g.position.copy(pos).y += 0.05;
     g.scale.setScalar(0.3);
     this.group.add(g);
-    const n = { tree: tr, group: g, eggs: [], built: 0, layAt: Infinity, color: mp.color === mp.partner.color ? mp.color : pick([mp.color, mp.partner.color]), perch: pos.clone().add(new THREE.Vector3(0.45, 0, 0)) };
+    const n = { tree: tr, group: g, eggs: [], built: 0, layAt: Infinity, color: breedColor(mp.color, mp.partner.color), perch: pos.clone().add(new THREE.Vector3(0.45, 0, 0)) };
     this.nests.push(n);
     mp.nest = n; mp.partner.nest = n;
     return n;
@@ -514,6 +514,15 @@ export class Wildlife {
     this.flyMagpie(mp, mp.tree);
     this.magpies.push(mp);
     return mp;
+  }
+  // 열매로 까치 색 바꾸기 (검정 부분만 열매 색, 흰 무늬는 그대로)
+  dye(m, color) {
+    const mp = this.magpies.find(x => x.m === m); if (!mp) return false;
+    const nm = makeMagpie(color);
+    nm.position.copy(m.position); nm.rotation.copy(m.rotation);
+    this.group.remove(m); this.group.add(nm);
+    mp.m = nm; mp.color = color;
+    return true;
   }
   // 밖에서 내려놓은 새는 날아감
   release(kind, color, pos) {
