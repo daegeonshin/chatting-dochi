@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { toon, outline, castAll, GFX, waterMat, TIME } from './look.js';
 import { mat, mesh, seeded, makeLabel, clamp } from './utils.js';
 import { COLORS7 } from './data.js';
 
@@ -47,6 +48,7 @@ export class World {
     this.boxes = [];   // { x0, x1, z0, z1 }
     this.trees = [];   // { x, z, y, h, r, type }
     this.nightMats = [];
+    this.treeMeshes = []; this.grassMeshes = [];
     this.rng = seeded(20261115);
     this.buildGround();
     this.buildPond();
@@ -54,6 +56,20 @@ export class World {
     this.buildGrass();
     this.buildVillage(profile);
     this.buildSky();
+    this.dressUp();
+  }
+
+  // 윤곽선과 그림자
+  dressUp() {
+    const hi = GFX.level === 'high';
+    this.ground.userData.noOutline = true;
+    this.grassMeshes.forEach(m => { m.userData.noOutline = true; });
+    if (!hi) this.treeMeshes.forEach(m => { m.userData.noOutline = true; });
+    outline(this.group, 0.05, 0x3a4a3a, 0.12);
+    castAll(this.group, hi, false);
+    this.grassMeshes.forEach(m => { m.castShadow = false; });
+    this.ground.castShadow = false;
+    this.ground.receiveShadow = true;
   }
 
   buildGround() {
@@ -84,7 +100,7 @@ export class World {
     }
     g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     g.computeVertexNormals();
-    const ground = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true }));
+    const ground = new THREE.Mesh(g, toon({ vertexColors: true }));
     ground.name = 'ground';
     this.ground = ground;
     this.group.add(ground);
@@ -92,7 +108,7 @@ export class World {
 
   buildPond() {
     const water = new THREE.Mesh(new THREE.CircleGeometry(POND.r + 1.6, 48),
-      new THREE.MeshLambertMaterial({ color: 0x69c3ef, transparent: true, opacity: 0.72, emissive: 0x103040 }));
+      waterMat());
     water.rotation.x = -Math.PI / 2;
     water.position.set(POND.x, WATER_Y, POND.z);
     this.water = water;
@@ -168,8 +184,8 @@ export class World {
     const dummy = new THREE.Object3D();
     const col = new THREE.Color();
     const inst = (geo, count, color) => {
-      const im = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0xffffff }), count);
-      im.userData.base = color; this.group.add(im); return im;
+      const im = new THREE.InstancedMesh(geo, toon({ color: 0xffffff }), count);
+      im.userData.base = color; this.group.add(im); this.treeMeshes.push(im); return im;
     };
     const place = (im, i, x, y, z, s, sy = s, rot = 0, color) => {
       dummy.position.set(x, y, z); dummy.scale.set(s, sy, s); dummy.rotation.set(0, rot, 0); dummy.updateMatrix();
@@ -228,8 +244,8 @@ export class World {
       for (let i = 0; i < 3; i++) { const b = blade.clone(); b.rotateZ((i - 1) * 0.35); b.translate((i - 1) * 0.08, 0, 0); parts.push(b); }
       tuft.copy(mergeGeos(parts));
     }
-    const N = 2600;
-    const grass = new THREE.InstancedMesh(tuft, new THREE.MeshLambertMaterial({ color: 0xffffff }), N);
+    const N = GFX.level === 'high' ? 4200 : 2200;
+    const grass = new THREE.InstancedMesh(tuft, toon({ color: 0xffffff }), N);
     let n = 0;
     for (let tries = 0; tries < N * 4 && n < N; tries++) {
       let x, z;
@@ -242,7 +258,7 @@ export class World {
       grass.setColorAt(n, col.set(0x6dbb4f).offsetHSL((r() - 0.5) * 0.05, 0, (r() - 0.3) * 0.12));
       n++;
     }
-    grass.count = n; grass.instanceColor.needsUpdate = true;
+    grass.count = n; grass.instanceColor.needsUpdate = true; this.grassMeshes.push(grass);
     this.group.add(grass);
     // 들판 꽃 (줄기 + 꽃잎 다섯 장)
     const stemGeo = new THREE.CylinderGeometry(0.018, 0.022, 0.32, 4).translate(0, 0.16, 0);
@@ -250,9 +266,9 @@ export class World {
     for (let k = 0; k < 5; k++) { const a = k / 5 * Math.PI * 2; petals.push(new THREE.SphereGeometry(0.075, 6, 4).scale(1, 0.45, 1).translate(Math.cos(a) * 0.08, 0.34, Math.sin(a) * 0.08)); }
     petals.push(new THREE.SphereGeometry(0.05, 6, 4).translate(0, 0.36, 0));
     const headGeo = mergeGeos(petals);
-    const FN = 420;
-    const stems = new THREE.InstancedMesh(stemGeo, new THREE.MeshLambertMaterial({ color: 0x5fae4c }), FN);
-    const flowers = new THREE.InstancedMesh(headGeo, new THREE.MeshLambertMaterial({ color: 0xffffff }), FN);
+    const FN = GFX.level === 'high' ? 700 : 400;
+    const stems = new THREE.InstancedMesh(stemGeo, toon({ color: 0x5fae4c }), FN);
+    const flowers = new THREE.InstancedMesh(headGeo, toon({ color: 0xffffff }), FN);
     const fc = [0xffffff, 0xfff27a, 0xffa6c9, 0xc9a7ff, 0xff8a8a];
     for (let i = 0; i < FN; i++) {
       const inM = i < FN * 0.75;
@@ -266,7 +282,7 @@ export class World {
       flowers.setColorAt(i, col.set(fc[Math.floor(r() * fc.length)]));
     }
     flowers.instanceColor.needsUpdate = true;
-    this.group.add(stems, flowers);
+    this.group.add(stems, flowers); this.grassMeshes.push(stems, flowers);
     // 덤불
     for (let i = 0; i < 40; i++) {
       const a = r() * 6.283, d = 30 + r() * 78;
@@ -293,7 +309,7 @@ export class World {
     this.circles.push({ x: 0, z: 0, r: 2.7 });
 
     // 가로등
-    this.lampMat = new THREE.MeshLambertMaterial({ color: 0xfff6cc, emissive: 0x000000 });
+    this.lampMat = toon({ color: 0xfff6cc, emissive: 0x000000 });
     for (let i = 0; i < 8; i++) {
       const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
       const x = Math.cos(a) * 11, z = Math.sin(a) * 11;
@@ -358,7 +374,7 @@ export class World {
     const knob = mesh(new THREE.SphereGeometry(0.07, 8, 6), 0xffd84d); knob.position.set(0.4, 1.0, 2.3);
     const step = mesh(new THREE.BoxGeometry(1.8, 0.15, 0.8), 0xd8d0c0); step.position.set(0, 0.08, 2.6);
     g.add(body, trim, roof, chimney, door, doorTop, knob, step);
-    this.windowMat = this.windowMat || new THREE.MeshLambertMaterial({ color: 0xbfe8ff, emissive: 0x000000 });
+    this.windowMat = this.windowMat || toon({ color: 0xbfe8ff, emissive: 0x000000 });
     for (const s of [-1, 1]) {
       const frame = mesh(new THREE.BoxGeometry(1.1, 1.1, 0.1), 0xffffff); frame.position.set(1.6 * s, 1.9, 2.22);
       const glass = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.85, 0.12), this.windowMat); glass.position.set(1.6 * s, 1.9, 2.24);
@@ -366,6 +382,8 @@ export class World {
       g.add(frame, glass, box);
       for (let k = 0; k < 3; k++) { const f = mesh(new THREE.SphereGeometry(0.12, 7, 5), [0xff7aa8, 0xfff27a, 0xffffff][k]); f.position.set(1.6 * s + (k - 1) * 0.35, 1.45, 2.4); g.add(f); }
     }
+    outline(g, 0.045, 0x4a3048, 0.1);
+    castAll(g, true, true);
     if (name) { const lb = makeLabel(name, '#ffffff', 'rgba(176,80,122,0.9)'); lb.position.set(0, 3.0, 2.5); lb.scale.multiplyScalar(1.3); g.add(lb); this.houseLabel = lb; }
     return g;
   }
@@ -408,8 +426,9 @@ export class World {
   }
 
   update(dt, t, night) {
+    TIME.value = t;
     if (this.spout) this.spout.scale.y = 1 + Math.sin(t * 6) * 0.15;
-    if (this.water) this.water.material.emissive.setHex(night > 0.5 ? 0x0a1a30 : 0x103040);
+    if (this.water) this.water.material.emissive.setHex(night > 0.5 ? 0x0a1a30 : 0x1a4a66);
     if (night > 0.01) {
       const p = this.fireflies.geometry.attributes.position;
       this.fireflySeeds.forEach((f, i) => {

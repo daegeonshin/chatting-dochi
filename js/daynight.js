@@ -1,8 +1,10 @@
 import * as THREE from 'three';
 import { DAY_MIN, NIGHT_MIN } from './data.js';
 import { clamp } from './utils.js';
+import { makeSkyDome, makeClouds, RIM, GFX } from './look.js';
 
 const DAY = DAY_MIN * 60 * 1000, NIGHT = NIGHT_MIN * 60 * 1000;
+const TOP_DAY = new THREE.Color(0x5eb6ff), BOT_DAY = new THREE.Color(0xfff2f8);
 const SKY_DAY = new THREE.Color(0xa8dcff), SKY_DUSK = new THREE.Color(0xffb3a0), SKY_NIGHT = new THREE.Color(0x1c2250);
 
 // 낮 25분, 밤은 최대 5분, 모두 자면 바로 아침
@@ -18,6 +20,15 @@ export class DayNight {
     scene.add(this.hemi, this.sun, this.amb, this.sun.target);
     scene.fog = new THREE.Fog(SKY_DAY.clone(), 60, 190);
     scene.background = SKY_DAY.clone();
+    this.dome = makeSkyDome(); scene.add(this.dome);
+    this.clouds = makeClouds(scene);
+    this.hemi.color.setHex(0xe8f4ff); this.hemi.groundColor.setHex(0xc8e8a8);
+    if (GFX.level === 'high') {
+      const s = this.sun; s.castShadow = true;
+      s.shadow.mapSize.set(1024, 1024);
+      const c = s.shadow.camera; c.left = -32; c.right = 32; c.top = 32; c.bottom = -32; c.near = 10; c.far = 200;
+      s.shadow.bias = -0.0008; s.shadow.normalBias = 0.04; s.shadow.radius = 3;
+    }
     this.night = 0;
     this.onChange = null; // (phase) => {}
   }
@@ -60,11 +71,21 @@ export class DayNight {
     else sky.copy(SKY_DUSK).lerp(SKY_NIGHT, (n - 0.5) * 2);
     if (n > 0.8) sky.copy(SKY_NIGHT);
     this.scene.fog.color.copy(sky);
+    const u = this.dome.userData.u;
+    u.mid.value.copy(sky);
+    u.top.value.copy(sky).lerp(TOP_DAY, 1 - n).multiplyScalar(n > 0.5 ? 0.55 : 1);
+    u.bot.value.copy(sky).lerp(BOT_DAY, 0.6 * (1 - n));
+    this.dome.position.copy(playerPos);
+    RIM.value.setRGB(0.32 - n * 0.12, 0.34 - n * 0.14, 0.4 + n * 0.05);
+    this.clouds.userData.mat.color.setScalar(1 - n * 0.6);
+    this.clouds.userData.mat.emissive.setHex(n > 0.5 ? 0x2a2a50 : 0x6a7090);
+    this.clouds.userData.update(1 / 60);
+    this.clouds.position.set(playerPos.x * 0.6, 0, playerPos.z * 0.6);
     this.hemi.intensity = 1.1 - n * 0.7;
-    this.hemi.color.setHex(n > 0.5 ? 0x8a9aff : 0xdff2ff);
+    this.hemi.color.setHex(n > 0.5 ? 0x8a9aff : 0xe8f4ff);
     this.sun.intensity = 1.7 - n * 1.4;
     this.sun.color.setHex(n > 0.5 ? 0xaab8ff : 0xfff4e0);
-    this.amb.intensity = 0.25 + n * 0.1;
+    this.amb.intensity = 0.4 + n * 0.05;
 
     // 해와 달
     const frac = this.isNight ? el / NIGHT : el / DAY;

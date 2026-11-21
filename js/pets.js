@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { outline } from './look.js';
 import { mesh, mat, blobShadow, makeLabel, emojiSprite, rand, angleLerp, clamp } from './utils.js';
 import { PETS } from './data.js';
 import { MEADOW, height, inMeadow } from './world.js';
@@ -154,6 +155,7 @@ export function makePetModel(type, colorId) {
   }
   const shadow = blobShadow(0.38); shadow.position.y = 0.02; g.add(shadow);
   parts.shadow = shadow;
+  outline(g, 0.016, 0x4a3048, 0.05);
   g.userData.parts = parts;
   return g;
 }

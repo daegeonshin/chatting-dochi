@@ -11,6 +11,7 @@ import { Pet, makePetModel } from './pets.js';
 import { Wildlife } from './wildlife.js';
 import { Floaters, clamp, lerp, angleLerp } from './utils.js';
 import { sfx, unlockAudio } from './audio.js';
+import { toon, outline, makeSkyDome, GFX, setGfx } from './look.js';
 import { $, toast, openPanel, closePanel, prompt, transition, el, hexCss } from './ui.js';
 
 const S = load();
@@ -21,6 +22,10 @@ const canvas = $('game');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.NeutralToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.shadowMap.enabled = GFX.level === 'high';
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 900);
 function resize() {
   renderer.setSize(innerWidth, innerHeight, false);
@@ -40,11 +45,11 @@ preview.scene.background = new THREE.Color(0xffd6e7);
 preview.scene.add(new THREE.HemisphereLight(0xffffff, 0xffc8dc, 1.4));
 { const d = new THREE.DirectionalLight(0xffffff, 1.2); d.position.set(2, 5, 4); preview.scene.add(d); }
 {
-  const floor = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.4, 0.3, 40), new THREE.MeshLambertMaterial({ color: 0xffffff }));
+  const floor = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.4, 0.3, 40), toon({ color: 0xffffff }));
   floor.position.y = -0.15; preview.scene.add(floor);
   for (let i = 0; i < 14; i++) {
     const a = i / 14 * Math.PI * 2;
-    const b = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), new THREE.MeshLambertMaterial({ color: [0xff9ec3, 0xffe27a, 0x9fd8ff, 0xc9a7ff][i % 4] }));
+    const b = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), toon({ color: [0xff9ec3, 0xffe27a, 0x9fd8ff, 0xc9a7ff][i % 4] }));
     b.position.set(Math.cos(a) * 2.1, 0.05, Math.sin(a) * 2.1); preview.scene.add(b);
   }
 }
@@ -388,7 +393,9 @@ onPress($('btn-setting'), () => openPanel('⚙️ 설정', body => {
   };
   const night = el('button', 'p-btn gray', '🌙 테스트 : 지금 밤으로');
   night.onclick = () => { closePanel(); G.dn.forceNight(); };
-  row.append(re, night);
+  const gfx = el('button', 'p-btn gray', GFX.level === 'high' ? '✨ 그래픽 : 예쁘게 (폰이 느리면 눌러요)' : '⚡ 그래픽 : 빠르게 (누르면 예쁘게)');
+  gfx.onclick = () => { persist(); setGfx(GFX.level === 'high' ? 'low' : 'high'); location.reload(); };
+  row.append(re, night, gfx);
   body.appendChild(row);
   body.appendChild(el('div', 'p-info', '밤은 25분마다 와요. 모두 자면 바로 아침이 되고, 안 자면 5분 뒤에 아침이 돼요.'));
 }));

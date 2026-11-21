@@ -1,9 +1,10 @@
 import * as THREE from 'three';
+import { toon } from './look.js';
 
 const matCache = new Map();
 export function mat(color, opts = {}) {
   const key = color + JSON.stringify(opts);
-  if (!matCache.has(key)) matCache.set(key, new THREE.MeshLambertMaterial({ color, ...opts }));
+  if (!matCache.has(key)) matCache.set(key, toon({ color, ...opts }));
   return matCache.get(key);
 }
 export function mesh(geo, color, opts) {

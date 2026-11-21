@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { toon, outline, castAll } from './look.js';
 import { mat, mesh, blobShadow } from './utils.js';
 import { HAIR_COLORS, EYE_COLORS, COLORS7 } from './data.js';
 
@@ -70,10 +71,11 @@ export class Avatar {
       for (const e of [eye, pupil, hi]) { e.userData.eye = true; e.userData.sy = e.scale.y; }
       head.add(eye, pupil, hi, lash);
       const cheek = mesh(S(0.08, 10, 8), 0xffa3b8); cheek.scale.set(1.3, 0.75, 0.4); cheek.position.set(0.3 * s, -0.12, 0.385);
+      cheek.userData.noOutline = true; lash.userData.noOutline = true;
       head.add(cheek);
     }
     const smile = mesh(new THREE.TorusGeometry(0.05, 0.014, 6, 12, Math.PI), 0xb0405a);
-    smile.rotation.z = Math.PI; smile.position.set(0, -0.13, 0.485); head.add(smile);
+    smile.userData.noOutline = true; smile.rotation.z = Math.PI; smile.position.set(0, -0.13, 0.485); head.add(smile);
 
     // 머리카락
     this.hairBits = [];
@@ -88,7 +90,7 @@ export class Avatar {
         head.add(bang);
       }
       if (p.hair === 'long') {
-        const back = mesh(new THREE.CylinderGeometry(0.52, 0.44, 0.95, 22, 1, true, Math.PI * 0.5, Math.PI), new THREE.MeshLambertMaterial({ color: hairC, side: THREE.DoubleSide }));
+        const back = mesh(new THREE.CylinderGeometry(0.52, 0.44, 0.95, 22, 1, true, Math.PI * 0.5, Math.PI), toon({ color: hairC, side: THREE.DoubleSide }));
         back.position.y = -0.4; head.add(back);
         for (const s of [-1, 1]) {
           const lock = mesh(new THREE.CapsuleGeometry(0.09, 0.45, 4, 8), hairC);
@@ -118,7 +120,7 @@ export class Avatar {
         }
       }
     }
-    this.model.traverse(o => { if (o.isMesh) o.castShadow = false; });
+    outline(this.model, 0.022);
   }
 
   // speed : 0~1, air : 공중 여부

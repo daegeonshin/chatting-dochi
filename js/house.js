@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { toon, outline, castAll, GFX } from './look.js';
 import { mesh, mat, makeLabel, emojiSprite, clamp, rand } from './utils.js';
 import { COLORS7, PETS } from './data.js';
 
@@ -52,7 +53,7 @@ export function makeFurniture(id, color = 0xffb3c8) {
     case 'lamp': {
       cyl(0.3, 0.35, 0.06, 0x8a8a9a, 0, 0.03, 0);
       cyl(0.04, 0.04, 1.4, 0x8a8a9a, 0, 0.73, 0, 8);
-      const shade = mesh(new THREE.CylinderGeometry(0.25, 0.42, 0.45, 16, 1, true), new THREE.MeshLambertMaterial({ color, emissive: 0x000000, side: THREE.DoubleSide }));
+      const shade = mesh(new THREE.CylinderGeometry(0.25, 0.42, 0.45, 16, 1, true), toon({ color, emissive: 0x000000, side: THREE.DoubleSide }));
       shade.position.y = 1.5; g.add(shade); g.userData.glow = shade.material;
       r = 0.35; break;
     }
@@ -127,10 +128,11 @@ export class House {
     this.saveData = saveData;
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0xffeef4);
-    this.hemi = new THREE.HemisphereLight(0xffffff, 0xffe0c8, 1.2);
+    this.hemi = new THREE.HemisphereLight(0xffffff, 0xffe8d8, 1.6);
     this.dir = new THREE.DirectionalLight(0xfff4e0, 1.0); this.dir.position.set(3, 8, 6);
+    if (GFX.level === 'high') { const d = this.dir; d.castShadow = true; d.shadow.mapSize.set(1024, 1024); const c = d.shadow.camera; c.left = -8; c.right = 8; c.top = 8; c.bottom = -8; c.far = 30; d.shadow.bias = -0.001; d.shadow.normalBias = 0.03; d.shadow.radius = 3; }
     this.lamp = new THREE.PointLight(0xffc87a, 0, 18); this.lamp.position.set(0, 3.5, 0);
-    this.amb = new THREE.AmbientLight(0xffffff, 0.7);
+    this.amb = new THREE.AmbientLight(0xffffff, 0.85);
     this.scene.add(this.hemi, this.dir, this.lamp, this.amb);
     this.shell = new THREE.Group(); this.scene.add(this.shell);
     this.furnGroup = new THREE.Group(); this.scene.add(this.furnGroup);
@@ -178,10 +180,12 @@ export class House {
     const lb = makeLabel('나가는 문 ↓', '#ffffff', 'rgba(255,143,179,0.9)'); lb.position.set(0, 0.5, D / 2 - 0.2); lb.scale.multiplyScalar(0.8); this.shell.add(lb);
     // 집 이름
     const nm = makeLabel(`${profile.houseName}`, '#b0507a', 'rgba(255,255,255,0.92)'); nm.position.set(0, 3.7, -D / 2 + 0.2); nm.scale.multiplyScalar(1.2); this.shell.add(nm);
+    this.shell.traverse(o => { if (o.isMesh) o.receiveShadow = true; });
   }
 
   addItem(f, isNew = true) {
     const g = makeFurniture(f.id, f.color);
+    outline(g, 0.018, 0x4a3048, 0.06); castAll(g, GFX.level === 'high', false);
     g.position.set(f.x, 0, f.z); g.rotation.y = f.rot || 0;
     g.userData.data = f;
     this.furnGroup.add(g);
