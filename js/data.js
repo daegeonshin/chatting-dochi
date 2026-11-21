@@ -69,3 +69,28 @@ export const FURN_COLORS = [0xffb3c8, 0x8fd3ff, 0xc9a7ff, 0xffd84d, 0x8fdc8f, 0x
 // 하루 리듬 (분)
 export const DAY_MIN = 25;
 export const NIGHT_MIN = 5;
+
+// 펫 집 (가구) : 어떤 동물의 집인지
+export const PET_HOMES = [
+  { id: 'cattower', name: '캣타워', emo: '🐱', for: ['cat'] },
+  { id: 'birdcage', name: '새장', emo: '🦜', for: ['parrot'] },
+  { id: 'grasscage', name: '잔디 케이지', emo: '🐰', for: ['rabbit', 'redpanda'] },
+  { id: 'doghouse', name: '개집', emo: '🐶', for: ['dog'] },
+  { id: 'slothtree', name: '작은 나무', emo: '🦥', for: ['sloth'] },
+  { id: 'chickbox', name: '병아리 상자', emo: '🐥', for: ['chick'] },
+  { id: 'nest', name: '둥지', emo: '🪺', for: ['magpie'] },
+];
+export const homeFor = type => PET_HOMES.find(h => h.for.includes(type));
+
+// 까치 색 (검정 부분 색). 열매 색과 교배 색은 3단계에서 사용
+export const MAGPIE_COLORS = {
+  black: { name: '검정', hex: 0x1a1a24 }, white: { name: '하양', hex: 0xf4f4f0 },
+  green: { name: '초록', hex: 0x3aa35a }, blue: { name: '파랑', hex: 0x3a6bd5 }, pink: { name: '핑크', hex: 0xff7aa8 },
+  purple: { name: '보라', hex: 0x8a5ad5 }, yellow: { name: '노랑', hex: 0xf2c94c }, red: { name: '빨강', hex: 0xe8433f },
+  lime: { name: '연두', hex: 0x9ad448 }, sky: { name: '하늘', hex: 0x8fd3ff }, lightpink: { name: '연핑크', hex: 0xffc0d8 },
+  lavender: { name: '연보라', hex: 0xc9a7ff }, gray: { name: '회색', hex: 0x9b9ba4 }, teal: { name: '청록', hex: 0x2aa8a0 }, mint: { name: '민트', hex: 0x9ff0d0 },
+};
+
+// 시간 (분)
+export const EGG_HATCH_MIN = 10;   // 둥지에 둔 까치 알이 깨기까지
+export const MAGPIE_GROW_MIN = 15; // 아기 까치가 어른이 되기까지

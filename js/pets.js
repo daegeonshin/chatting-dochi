@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { outline } from './look.js';
 import { mesh, mat, blobShadow, makeLabel, emojiSprite, rand, angleLerp, clamp } from './utils.js';
-import { PETS } from './data.js';
+import { PETS, homeFor } from './data.js';
 import { MEADOW, height, inMeadow } from './world.js';
 import { sfx } from './audio.js';
 
@@ -231,7 +231,7 @@ export class Pet {
     this.yaw = angleLerp(this.yaw, Math.atan2(dx, dz), Math.min(1, dt * 8));
     this.pos.x += Math.sin(this.yaw) * this.speed * dt;
     this.pos.z += Math.cos(this.yaw) * this.speed * dt;
-    if (env) env.collide(this.pos, 0.3);
+    if (env) env.collide(this.pos, 0.3, false, false, this.skipItem || null);
     return false;
   }
 
@@ -274,11 +274,33 @@ export class Pet {
   }
 
   startWalk() {
-    this.mode = 'walk';
-    this.sub = this.def.special === 'fly' ? 'perch' : 'follow';
+    this.mode = 'walk'; this.data.walking = true;
+    this.sub = this.def.special === 'fly' && !this.groundWalk ? 'perch' : 'follow';
     this.climbing = 0;
   }
-  goHome() { this.ctx.player.avatar.perch = false; this.mode = 'home'; this.sub = 'idle'; this.climbing = 0; this.model.rotation.set(0, 0, 0); this.model.position.set(0, 0, 0); }
+  goHome() {
+    if (this.sub === 'perch') this.ctx.player.avatar.perch = false;
+    this.mode = 'home'; this.sub = 'idle'; this.data.walking = false; this.climbing = 0; this.skipItem = null;
+    this.model.rotation.set(0, 0, 0); this.model.position.set(0, 0, 0); this.pos.y = 0;
+  }
+  // 앵무새 : 팔 ↔ 바닥 (더블탭)
+  toggleGround() {
+    if (this.def.id !== 'parrot' || this.mode !== 'walk') return null;
+    if (this.sub === 'perch') { this.groundWalk = true; this.sub = 'follow'; this.ctx.player.avatar.perch = false; this.pos.y = height(this.pos.x, this.pos.z); return `${this.data.name}(이)가 내려와서 따라와요`; }
+    this.groundWalk = false; this.sub = 'perch'; return `${this.data.name}(이)가 팔에 올라왔어요`;
+  }
+  // 안기 / 내려놓기 (main의 들기 시스템이 위치를 맞춤)
+  pickUp() {
+    if (this.sub === 'perch') this.ctx.player.avatar.perch = false;
+    this.prevMode = this.mode; this.sub = 'carried'; this.climbing = 0; this.skipItem = null;
+    this.model.rotation.set(0, 0, 0);
+  }
+  putDown(outside) {
+    this.sub = 'idle'; this.model.rotation.set(0, 0, 0); this.model.position.set(0, 0, 0);
+    if (outside) this.startWalk(); else { this.mode = 'home'; this.data.walking = false; this.pos.y = 0; }
+  }
+  get onGround() { return !['perch', 'fly', 'carried', 'climb', 'climbGo', 'inHome', 'sleep'].includes(this.sub); }
+  homeItem(home) { const h = homeFor(this.def.id); return h ? home.findItem(h.id) : null; }
 
   update(dt, env, home) {
     this.t += dt;
@@ -290,20 +312,59 @@ export class Pet {
     const isBird = this.def.id === 'parrot';
     const slow = this.def.id === 'sloth' ? 0.45 : 1;
 
-    if (this.mode === 'home') {
-      // 집 안 : 돌아다니다 배고프면 밥그릇으로
-      if (home.bowlFull && this.hungry && this.sub !== 'eat') { this.sub = 'toBowl'; }
-      if (this.sub === 'toBowl') {
+    if (this.sub === 'carried') {
+      // 품에 안김 : 위치는 main에서
+      this.speed = 0;
+    } else if (this.mode === 'home') {
+      const night = this.ctx.isNight && this.ctx.isNight();
+      const hi = this.homeItem(home);
+      // 밤 : 펫 집(없으면 침대 옆)에서 잠
+      if (night && !['toBed', 'sleep', 'eat', 'toBowl'].includes(this.sub)) {
+        this.sub = 'toBed';
+        if (hi) { this.bedSpot = home.spotOf(hi, hi.userData.sleepSpot ? 'sleepSpot' : 'spot'); this.skipItem = hi; }
+        else { const bed = home.bedItem(); this.bedSpot = new THREE.Vector3(bed.position.x + 1.8 + rand(-0.4, 0.4), 0, bed.position.z + rand(0, 1.2)); this.skipItem = null; }
+      }
+      if (!night && (this.sub === 'sleep' || this.sub === 'toBed')) { this.sub = 'idle'; this.timer = 0.5; this.skipItem = null; this.pos.y = 0; }
+      if (home.bowlFull && this.hungry && !['eat', 'toBowl', 'sleep', 'toBed'].includes(this.sub)) { this.sub = 'toBowl'; this.skipItem = null; this.pos.y = 0; }
+      if (this.sub === 'toBed' || this.sub === 'toHome') {
+        const sp = this.sub === 'toBed' ? this.bedSpot : this.homeSpot;
+        if (!sp) { this.sub = 'idle'; }
+        else if (this.moveTo(sp.x, sp.z, 1.8 * slow, dt, env)) {
+          this.pos.x = sp.x; this.pos.z = sp.z;
+          this.pos.y += (sp.y - this.pos.y) * Math.min(1, dt * 8);
+          if (Math.abs(sp.y - this.pos.y) < 0.02) {
+            this.pos.y = sp.y;
+            if (this.sub === 'toBed') { this.sub = 'sleep'; this.timer = 0; }
+            else { this.sub = 'inHome'; this.timer = rand(6, 12); if (Math.random() < 0.5) this.showIcon(['🎵', '💕', '✨'][Math.floor(Math.random() * 3)], 1.5); }
+          }
+        } else if (sp.y > 0.3 && Math.hypot(sp.x - this.pos.x, sp.z - this.pos.z) < 0.9) {
+          // 가까워지면 폴짝 올라감
+          this.pos.y += (sp.y - this.pos.y) * Math.min(1, dt * 5);
+        }
+        if (this.sub === 'toBed' || this.sub === 'toHome') air = this.pos.y > 0.05 ? 0 : 0;
+      } else if (this.sub === 'sleep') {
+        this.speed = 0; this.timer -= dt;
+        if (this.timer <= 0) { this.timer = 4; this.showIcon('💤', 2.5); }
+      } else if (this.sub === 'inHome') {
+        this.speed = 0; this.timer -= dt;
+        if (this.timer <= 0) { this.sub = 'idle'; this.timer = rand(1, 3); this.pos.y = 0; this.skipItem = null; const p = home.randomSpot(); this.target = p; this.sub = 'wander'; }
+      } else if (this.sub === 'toBowl') {
         if (this.moveTo(home.bowl.x, home.bowl.z - 0.85, 2.2 * slow, dt, env)) { this.sub = 'eat'; this.timer = 3; this.yaw = 0; sfx.eat(); }
+        this.pos.y = 0;
       } else if (this.sub === 'eat') {
         this.timer -= dt;
         this.parts.head.rotation.x = 0.4 + Math.sin(this.t * 14) * 0.15;
         if (this.timer <= 0) { home.eat(); this.data.lastFed = Date.now(); this.sub = 'idle'; this.parts.head.rotation.x = 0; this.showIcon('😋'); this.checkHealth(); this.ctx.onSave(); }
+        this.pos.y = 0;
       } else {
         this.timer -= dt;
         if (this.timer <= 0) {
           this.timer = sick ? rand(6, 10) : rand(2, 5);
-          if (!sick && Math.random() < 0.65) { const p = home.randomSpot(); this.target = p; this.sub = 'wander'; }
+          const r = Math.random();
+          if (!sick && hi && r < 0.3) {
+            const key = hi.userData.spot2 && Math.random() < 0.5 ? 'spot2' : (hi.userData.spotTop && Math.random() < 0.4 ? 'spotTop' : 'spot');
+            this.homeSpot = home.spotOf(hi, key); this.skipItem = hi; this.sub = 'toHome';
+          } else if (!sick && r < 0.75) { const p = home.randomSpot(); this.target = p; this.sub = 'wander'; }
           else { this.sub = 'idle'; this.target = null; }
           if (sick) this.showIcon('🤒', 3);
           else if (this.hungry && Math.random() < 0.5) this.showIcon('🍽️');
@@ -311,8 +372,8 @@ export class Pet {
         }
         if (this.sub === 'wander' && this.target && this.moveTo(this.target.x, this.target.z, 1.6 * slow, dt, env)) this.sub = 'idle';
         else if (this.sub === 'idle') this.speed *= 0.85;
+        this.pos.y = 0;
       }
-      this.pos.y = 0;
     } else {
       // 산책 중
       const pp = player.pos;
@@ -322,19 +383,21 @@ export class Pet {
         this.pos.copy(a); this.pos.y += 0.02;
         this.yaw = player.yaw; this.speed = 0;
         player.avatar.perch = true;
-      } else {
+      } else if (isBird) {
         player.avatar.perch = false;
       }
       if (this.sub === 'follow') {
-        const behind = 1.6;
-        const tx = pp.x - Math.sin(player.yaw) * behind + Math.cos(player.yaw) * 0.9;
-        const tz = pp.z - Math.cos(player.yaw) * behind - Math.sin(player.yaw) * 0.9;
+        const wi = this.walkIdx || 0;
+        const behind = 1.6 + Math.floor(wi / 2) * 1.1, side = (wi % 2 ? -0.9 : 0.9);
+        const tx = pp.x - Math.sin(player.yaw) * behind + Math.cos(player.yaw) * side;
+        const tz = pp.z - Math.cos(player.yaw) * behind - Math.sin(player.yaw) * side;
         if (dPlayer > 35) { this.pos.set(tx, height(tx, tz), tz); }
         const fast = player.riding ? 1.6 : 1;
         if (Math.hypot(tx - this.pos.x, tz - this.pos.z) > 0.8) this.moveTo(tx, tz, (dPlayer > 4 ? 8 : 5) * fast * slow, dt, env);
         else this.speed *= 0.8;
         this.pos.y = height(this.pos.x, this.pos.z);
-        if (isBird && dPlayer < 1.5 && !player.riding) this.sub = 'perch';
+        if (isBird && !this.groundWalk && dPlayer < 1.5 && !player.riding) this.sub = 'perch';
+        if (isBird && this.groundWalk && this.speed > 0.3) air = Math.abs(Math.sin(this.t * 12)) * 0.12;
       } else if (this.sub === 'run') {
         if (!this.target || this.moveTo(this.target.x, this.target.z, inMeadow(this.pos.x, this.pos.z) ? 6 : 8, dt, env)) {
           const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * (MEADOW.r - 3);
@@ -385,20 +448,28 @@ export class Pet {
     const P = this.parts;
     const spdN = clamp(this.speed / 4, 0, 1.5);
     const w = this.t * (6 + spdN * 8);
-    const climbingNow = this.sub === 'climb' || (this.sub === 'climbGo' && this.climbing > 0);
+    const hanging = (this.sub === 'inHome' || this.sub === 'sleep') && this.skipItem && this.skipItem.userData.hang;
+    const climbingNow = this.sub === 'climb' || (this.sub === 'climbGo' && this.climbing > 0) || hanging;
+    const sleeping = this.sub === 'sleep' && !hanging;
     P.legs.forEach((L, i) => {
       if (climbingNow) L.rotation.x = -1.2 + Math.sin(this.t * 4 + i) * (this.sub === 'climb' ? 0.05 : 0.4);
       else L.rotation.x = Math.sin(w + (i % 2 ? Math.PI : 0) + (i > 1 ? Math.PI : 0)) * 0.6 * spdN;
     });
-    if (climbingNow) { this.model.rotation.x = -1.2; this.model.position.set(0, 0, 0.2); }
+    if (sleeping) {
+      P.legs.forEach(L => L.rotation.x = isBird ? 0 : -1.3);
+      this.model.rotation.x = 0; this.model.position.set(0, isBird ? 0 : -0.12, 0);
+    } else if (this.sub === 'carried') {
+      P.legs.forEach((L, i) => L.rotation.x = 0.3 + Math.sin(this.t * 3 + i) * 0.15);
+      this.model.rotation.x = 0; this.model.position.set(0, 0, 0);
+    } else if (climbingNow) { this.model.rotation.x = -1.2; this.model.position.set(0, 0, 0.2); }
     else if (sick && this.mode === 'home' && this.speed < 0.3) { this.model.rotation.x = 0; this.model.position.y = -0.08; }
     else { this.model.rotation.x = 0; this.model.position.set(0, air + (this.happy > 0 ? Math.abs(Math.sin(this.happy * 9)) * 0.3 : Math.abs(Math.sin(w)) * 0.04 * spdN), 0); }
     if (P.tail) P.tail.rotation.y = Math.sin(this.t * (this.happy > 0 ? 18 : 4)) * (this.happy > 0 ? 0.7 : 0.25);
     const flap = this.sub === 'fly' ? Math.sin(this.t * 22) * 1.1 : (this.happy > 0 ? Math.sin(this.t * 20) * 0.6 : 0);
     P.wings.forEach((wg, i) => wg.rotation.z = (i ? -1 : 1) * (flap > 0 ? flap : flap * 0.3) * (i ? 1 : 1));
-    P.head.rotation.y = this.sub === 'eat' ? 0 : Math.sin(this.t * 0.7) * 0.25;
-    if (this.sub !== 'eat') P.head.rotation.x = sick ? 0.3 : 0;
-    P.shadow.visible = this.sub !== 'fly' && this.sub !== 'perch' && !climbingNow;
+    P.head.rotation.y = this.sub === 'eat' || sleeping ? 0 : Math.sin(this.t * 0.7) * 0.25;
+    if (this.sub !== 'eat') P.head.rotation.x = sleeping ? 0.45 : sick ? 0.3 : 0;
+    P.shadow.visible = this.sub !== 'fly' && this.sub !== 'perch' && this.sub !== 'carried' && !climbingNow && this.pos.y < 0.05 + (this.mode === 'walk' ? height(this.pos.x, this.pos.z) : 0);
     const s = this.sub === 'fly' ? 1.4 : 1;
     this.model.scale.setScalar(s);
     this.label.visible = this.sub !== 'fly';

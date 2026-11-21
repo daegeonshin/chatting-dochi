@@ -4,6 +4,7 @@ import { clamp } from './utils.js';
 import { makeSkyDome, makeClouds, RIM, GFX } from './look.js';
 
 const DAY = DAY_MIN * 60 * 1000, NIGHT = NIGHT_MIN * 60 * 1000;
+const GREY = new THREE.Color(0xa9b4c4), GREY_SNOW = new THREE.Color(0xdde3ec);
 const TOP_DAY = new THREE.Color(0x5eb6ff), BOT_DAY = new THREE.Color(0xfff2f8);
 const SKY_DAY = new THREE.Color(0xa8dcff), SKY_DUSK = new THREE.Color(0xffb3a0), SKY_NIGHT = new THREE.Color(0x1c2250);
 
@@ -70,14 +71,18 @@ export class DayNight {
     if (n < 0.5) sky.copy(SKY_DAY).lerp(SKY_DUSK, Math.sin(n * Math.PI) * 0.8);
     else sky.copy(SKY_DUSK).lerp(SKY_NIGHT, (n - 0.5) * 2);
     if (n > 0.8) sky.copy(SKY_NIGHT);
+    const w = this.weather;
+    const cl = w ? w.cloud : 0;
+    if (w) sky.lerp(w.snowy > 0.3 ? GREY_SNOW : GREY, cl * 0.7 * (1 - n * 0.6));
     this.scene.fog.color.copy(sky);
+    this.scene.fog.far = 190 - (w ? w.wet * 70 + w.snowy * 50 : 0);
     const u = this.dome.userData.u;
     u.mid.value.copy(sky);
     u.top.value.copy(sky).lerp(TOP_DAY, 1 - n).multiplyScalar(n > 0.5 ? 0.55 : 1);
     u.bot.value.copy(sky).lerp(BOT_DAY, 0.6 * (1 - n));
     this.dome.position.copy(playerPos);
     RIM.value.setRGB(0.32 - n * 0.12, 0.34 - n * 0.14, 0.4 + n * 0.05);
-    this.clouds.userData.mat.color.setScalar(1 - n * 0.6);
+    this.clouds.userData.mat.color.setScalar(1 - n * 0.6 - cl * 0.22);
     this.clouds.userData.mat.emissive.setHex(n > 0.5 ? 0x2a2a50 : 0x6a7090);
     this.clouds.userData.update(1 / 60);
     this.clouds.position.set(playerPos.x * 0.6, 0, playerPos.z * 0.6);
@@ -85,7 +90,8 @@ export class DayNight {
     this.hemi.color.setHex(n > 0.5 ? 0x8a9aff : 0xe8f4ff);
     this.sun.intensity = 1.7 - n * 1.4;
     this.sun.color.setHex(n > 0.5 ? 0xaab8ff : 0xfff4e0);
-    this.amb.intensity = 0.4 + n * 0.05;
+    this.amb.intensity = 0.4 + n * 0.05 + cl * 0.15;
+    this.sun.intensity *= 1 - cl * 0.55;
 
     // 해와 달
     const frac = this.isNight ? el / NIGHT : el / DAY;

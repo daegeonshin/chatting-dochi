@@ -203,7 +203,7 @@ export class World {
       const g = vary(0x3f8f4f);
       pLayers.forEach((L, k) => place(L, i, p.x, y, p.z, s, s, rot + k, col.set(g).offsetHSL(0, 0, k * 0.04).getHex()));
       this.circles.push({ x: p.x, z: p.z, r: 0.55 * s });
-      this.trees.push({ x: p.x, z: p.z, y, h: 6.6 * s, r: 0.3 * s, trunkY: 1.6 * s, type: 'pine' });
+      this.trees.push({ x: p.x, z: p.z, y, h: 6.6 * s, r: 0.3 * s, trunkY: 1.6 * s, type: 'pine', cy: 6.25 * s, cr: 0, cry: 0 });
     });
     // 둥근 나무
     const rTrunk = inst(new THREE.CylinderGeometry(0.25, 0.38, 2.8, 7).translate(0, 1.4, 0), rounds.length);
@@ -217,7 +217,7 @@ export class World {
       place(rTop, i, p.x, y, p.z, s, s * 0.9, rot, g);
       place(rTop2, i, p.x, y, p.z, s, s * 0.9, rot, col.set(g).offsetHSL(0, 0, -0.05).getHex());
       this.circles.push({ x: p.x, z: p.z, r: 0.6 * s });
-      this.trees.push({ x: p.x, z: p.z, y, h: 5.6 * s, r: 0.33 * s, trunkY: 1.4 * s, type: 'round' });
+      this.trees.push({ x: p.x, z: p.z, y, h: 5.6 * s, r: 0.33 * s, trunkY: 1.4 * s, type: 'round', cy: 3.51 * s, cr: 1.9 * s, cry: 1.71 * s });
     });
     // 자작나무
     const bTrunk = inst(new THREE.CylinderGeometry(0.16, 0.22, 4.2, 7).translate(0, 2.1, 0), birches.length);
@@ -227,7 +227,7 @@ export class World {
       place(bTrunk, i, p.x, y, p.z, s, s, rot, 0xf2efe6);
       place(bTop, i, p.x, y, p.z, s, s * 1.3, rot, vary(0xb6dd5c));
       this.circles.push({ x: p.x, z: p.z, r: 0.4 * s });
-      this.trees.push({ x: p.x, z: p.z, y, h: 6.2 * s, r: 0.2 * s, trunkY: 2.2 * s, type: 'birch' });
+      this.trees.push({ x: p.x, z: p.z, y, h: 6.2 * s, r: 0.2 * s, trunkY: 2.2 * s, type: 'birch', cy: 5.98 * s, cr: 1.4 * s, cry: 1.82 * s });
     });
     this.group.children.forEach(o => { if (o.isInstancedMesh && o.instanceColor) o.instanceColor.needsUpdate = true; });
   }
@@ -375,18 +375,41 @@ export class World {
     const step = mesh(new THREE.BoxGeometry(1.8, 0.15, 0.8), 0xd8d0c0); step.position.set(0, 0.08, 2.6);
     g.add(body, trim, roof, chimney, door, doorTop, knob, step);
     this.windowMat = this.windowMat || toon({ color: 0xbfe8ff, emissive: 0x000000 });
-    for (const s of [-1, 1]) {
-      const frame = mesh(new THREE.BoxGeometry(1.1, 1.1, 0.1), 0xffffff); frame.position.set(1.6 * s, 1.9, 2.22);
-      const glass = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.85, 0.12), this.windowMat); glass.position.set(1.6 * s, 1.9, 2.24);
-      const box = mesh(new THREE.BoxGeometry(1.2, 0.25, 0.35), 0x9a6a44); box.position.set(1.6 * s, 1.25, 2.4);
-      g.add(frame, glass, box);
-      for (let k = 0; k < 3; k++) { const f = mesh(new THREE.SphereGeometry(0.12, 7, 5), [0xff7aa8, 0xfff27a, 0xffffff][k]); f.position.set(1.6 * s + (k - 1) * 0.35, 1.45, 2.4); g.add(f); }
-    }
+    // 창문 : 문 양쪽(fl, fr) + 왼쪽(l), 오른쪽(r), 뒤(b) 벽에 하나씩
+    const wins = {};
+    const makeWin = (key, x, y, z, rotY, flowers) => {
+      const w = new THREE.Group(); w.position.set(x, y, z); w.rotation.y = rotY;
+      const frame = mesh(new THREE.BoxGeometry(1.1, 1.1, 0.1), 0xffffff); w.add(frame);
+      const hole = mesh(new THREE.BoxGeometry(0.86, 0.86, 0.05), 0x5a4060); hole.position.z = 0.04; w.add(hole);
+      const curtain = mesh(new THREE.BoxGeometry(0.84, 0.84, 0.02), 0xffb3c8); curtain.position.z = 0.07; w.add(curtain);
+      const panes = [-1, 1].map(s => {
+        const hinge = new THREE.Group(); hinge.position.set(0.43 * s, 0, 0.1);
+        const p = new THREE.Mesh(new THREE.BoxGeometry(0.43, 0.86, 0.04), this.windowMat); p.position.x = -0.215 * s; hinge.add(p);
+        const bar = mesh(new THREE.BoxGeometry(0.04, 0.86, 0.05), 0xffffff); bar.position.x = -0.42 * s; hinge.add(bar);
+        w.add(hinge); return hinge;
+      });
+      if (flowers) {
+        const box = mesh(new THREE.BoxGeometry(1.2, 0.25, 0.35), 0x9a6a44); box.position.set(0, -0.65, 0.18); w.add(box);
+        for (let k = 0; k < 3; k++) { const f = mesh(new THREE.SphereGeometry(0.12, 7, 5), [0xff7aa8, 0xfff27a, 0xffffff][k]); f.position.set((k - 1) * 0.35, -0.45, 0.18); w.add(f); }
+      }
+      g.add(w);
+      wins[key] = { panes, curtain, hole };
+    };
+    makeWin('fl', -1.6, 1.9, 2.2, 0, true);
+    makeWin('fr', 1.6, 1.9, 2.2, 0, true);
+    makeWin('l', -2.5, 1.9, 0, -Math.PI / 2, false);
+    makeWin('r', 2.5, 1.9, 0, Math.PI / 2, false);
+    makeWin('b', 0, 1.9, -2.2, Math.PI, false);
+    g.userData.wins = wins;
+    if (this.winState) applyWindows(g, this.winState);
     outline(g, 0.045, 0x4a3048, 0.1);
     castAll(g, true, true);
     if (name) { const lb = makeLabel(name, '#ffffff', 'rgba(176,80,122,0.9)'); lb.position.set(0, 3.0, 2.5); lb.scale.multiplyScalar(1.3); g.add(lb); this.houseLabel = lb; }
     return g;
   }
+
+  // 창문 열기, 커튼
+  setWindows(state) { this.winState = state; applyWindows(this.myHouse, state); }
 
   // 집 색이나 이름이 바뀌면 다시 짓기
   rebuildHouse(profile) {
@@ -474,6 +497,16 @@ export class World {
     for (const t of this.trees) {
       if (t.type === 'pine') continue; const d = (t.x - x) ** 2 + (t.z - z) ** 2; if (d < bd) { bd = d; best = t; } }
     return best;
+  }
+}
+
+export function applyWindows(house, state) {
+  const wins = house && house.userData.wins;
+  if (!wins || !state) return;
+  for (const [k, w] of Object.entries(wins)) {
+    const st = state[k] || { open: false, cur: true };
+    w.panes.forEach((p, i) => { p.rotation.y = st.open ? (i ? 1 : -1) * 1.9 : 0; });
+    w.curtain.visible = !st.cur;
   }
 }
 

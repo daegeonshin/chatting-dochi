@@ -8,6 +8,11 @@ import { Input, onPress } from './input.js';
 import { DayNight } from './daynight.js';
 import { House } from './house.js';
 import { Pet, makePetModel } from './pets.js';
+import { Weather, WEATHERS } from './weather.js';
+import { HomeBirds } from './homebirds.js';
+import { makeEgg } from './wildlife.js';
+import { PET_HOMES, homeFor } from './data.js';
+import { uid } from './save.js';
 import { Wildlife } from './wildlife.js';
 import { Floaters, clamp, lerp, angleLerp } from './utils.js';
 import { sfx, unlockAudio } from './audio.js';
@@ -117,61 +122,101 @@ function startGame() {
   G.built = true;
   G.forest = new THREE.Scene();
   G.world = new World(G.forest, S.profile);
+  G.world.setWindows(S.windows);
+  G.weather = new Weather(G.forest);
+  G.weather.onChange = k => { const w = WEATHERS[k]; toast(`${w.icon} 날씨가 바뀌었어요 : ${w.name}`); };
   G.dn = new DayNight(G.forest, G.world, S.clock);
+  G.dn.weather = G.weather;
   G.dn.onChange = phase => {
     persist();
-    if (phase === 'night') toast('밤이 되었어요 🌙 집에 가서 침대에서 자요', 4000);
+    if (phase === 'night') toast('밤이 되었어요 🌙 새와 오리는 집으로 갔어요. 침대에서 자요', 4000);
     else { toast('아침이 밝았어요 ☀️', 3000); sfx.morning(); }
   };
-  G.wild = new Wildlife(G.forest, G.world);
+  G.wild = new Wildlife(G.forest, G.world, {
+    isNight: () => G.dn.isNight, nightLevel: () => G.dn.night, weather: G.weather,
+    house: { anyOpen: () => G.house.anyOpen(), doorPos: new THREE.Vector3(HOUSE_POS.x, 0, HOUSE_POS.z), windowWorld },
+    onBirdEnter: (kind, color) => { const b = G.birds.addBird(kind, color, { guest: true }); b.justIn = G.house.anyOpen() || 'b'; },
+  });
   G.avatar = new Avatar(S.profile);
   G.player = new Player(G.avatar);
   G.floatF = new Floaters(G.forest);
-  G.house = new House(S.profile, S, { onSave: persist, toast, getPet: () => S.pet });
+  G.house = new House(S.profile, S, { onSave: persist, toast });
+  G.house.applyWindows(S.windows);
   G.floatH = new Floaters(G.house.scene);
+  G.birds = new HomeBirds(G.house, S, { toast, onSave: persist, inHouse: () => G.mode === 'house', raining: () => G.weather.raining });
   G.player.pos.set(HOUSE_POS.x, 0, HOUSE_POS.z + 5);
   G.player.yaw = 0; G.camYaw = 0.5;
   camTarget.set(G.player.pos.x, 1.3, G.player.pos.z);
   G.forest.add(G.player.root);
-  if (S.pet) createPet();
+  G.pets = [];
+  S.pets.forEach(d => createPet(d));
+  G.pets.filter(p => p.data.walking).forEach(p => startWalk(p, true)); // 산책 중에 껐으면 다시 산책
+  G.house.setPets(S.pets);
   buildCatalog();
   setMode('forest');
   $('hud').classList.remove('hidden');
   setTimeout(() => {
     toast(`${S.profile.name}, 숲속 마을에 온 걸 환영해요!`, 3200);
-    if (S.pet) {
-      const last = new Date(S.pet.lastFed).toDateString();
-      if (last !== new Date().toDateString()) setTimeout(() => toast(`${S.pet.name}(이)가 아침밥을 기다려요 🍽️`, 3500), 3600);
-    }
+    const hungry = G.pets.find(p => new Date(p.data.lastFed).toDateString() !== new Date().toDateString());
+    if (hungry) setTimeout(() => toast(`${hungry.data.name}(이)가 아침밥을 기다려요 🍽️`, 3500), 3600);
   }, 600);
   setInterval(persist, 5000);
+  setInterval(sparrowVisit, 60000);
   addEventListener('visibilitychange', () => { if (document.hidden) persist(); });
 }
+
+// 집 밖 창문 위치 (참새가 날아 들어가는 곳)
+function windowWorld(key) {
+  const o = { fl: [-1.6, 2.6], fr: [1.6, 2.6], l: [-2.9, 0], r: [2.9, 0], b: [0, -2.6] }[key] || [0, 2.6];
+  return new THREE.Vector3(HOUSE_POS.x + o[0], 1.9, HOUSE_POS.z + o[1]);
+}
+// 창문을 열어 두고 나가면 가끔 참새가 들어오고, 바람에 창문이 닫히면 못 나감
+function sparrowVisit() {
+  if (G.mode !== 'forest' || G.dn.isNight) return;
+  const key = G.house.anyOpen();
+  if (!key) return;
+  if (Math.random() > (G.weather.raining ? 0.6 : 0.3)) return;
+  const b = G.birds.addBird('sparrow', 'brown', { guest: true }); b.justIn = key;
+  if (Math.random() < 0.5) { S.windows[key].open = false; applyWindowState(); }
+}
+function applyWindowState() { G.world.setWindows(S.windows); G.house.applyWindows(S.windows); persist(); }
 
 function applyProfile() {
   G.avatar.build(S.profile);
   G.world.rebuildHouse(S.profile);
+  G.world.setWindows(S.windows);
   G.house.buildShell(S.profile);
 }
 
 function petCtx() {
-  return { world: G.world, player: G.player, get floaters() { return G.mode === 'house' ? G.floatH : G.floatF; }, onSave: persist, toast };
+  return { world: G.world, player: G.player, get floaters() { return G.mode === 'house' ? G.floatH : G.floatF; }, onSave: persist, toast, isNight: () => G.dn.isNight };
 }
-function createPet() {
-  G.pet = new Pet(S.pet, petCtx());
-  G.pet.setScene(G.house.scene);
-  const p = G.house.randomSpot(); G.pet.pos.set(p.x, 0, p.z);
-  G.house.setPet(S.pet);
-  G.pet.checkHealth();
+function createPet(d) {
+  const pet = new Pet(d, petCtx());
+  pet.setScene(G.house.scene);
+  const p = G.house.randomSpot(); pet.pos.set(p.x, 0, p.z);
+  pet.checkHealth();
+  G.pets.push(pet);
+  return pet;
 }
+const walkers = () => G.pets.filter(p => p.mode === 'walk' && p.sub !== 'carried');
+const mainWalker = () => { const w = walkers(); return w.find(p => p === G.walkPet) || w[w.length - 1] || null; };
 
 function setMode(m) {
   G.mode = m;
   const inHouse = m === 'house';
   $('deco-bar').classList.toggle('hidden', !inHouse);
+  $('btn-window').classList.toggle('hidden', !inHouse);
   if (!inHouse) setDeco(false);
   $('btn-ride').classList.toggle('disabled', inHouse);
   refreshButtons();
+}
+
+// 들고 있는 것 (펫, 새, 알)을 새 장소로 옮기기
+function moveCarryTo(scene) {
+  const c = G.carry; if (!c) return;
+  if (c.kind === 'pet') c.pet.setScene(scene);
+  else { if (c.obj.parent) c.obj.parent.remove(c.obj); scene.add(c.obj); }
 }
 
 // 집 들어가기와 나가기
@@ -183,11 +228,14 @@ function enterHouse() {
     G.house.scene.add(G.player.root);
     G.player.pos.set(0, 0, 3.8); G.player.yaw = Math.PI; G.player.vy = 0;
     G.houseYaw = 0;
-    if (G.pet && G.petWalking) { G.petWalking = false; G.pet.goHome(); G.pet.setScene(G.house.scene); G.pet.pos.set(1.2, 0, 3.6); }
+    walkers().forEach((pet, i) => { pet.goHome(); pet.setScene(G.house.scene); pet.pos.set(1.2 - i * 0.8, 0, 3.6); });
+    moveCarryTo(G.house.scene);
+    G.walkPet = null;
     setMode('house');
+    G.birds.flushNews();
   });
 }
-function exitHouse(withPet = false) {
+function exitHouse(withPet = null) {
   sfx.door();
   transition(() => {
     G.house.scene.remove(G.player.root);
@@ -196,34 +244,40 @@ function exitHouse(withPet = false) {
     G.camYaw = 0.5;
     camTarget.set(G.player.pos.x, 1.3, G.player.pos.z);
     G.avatar.pose = 'stand';
+    moveCarryTo(G.forest);
     setMode('forest');
-    if (withPet) startWalk();
+    if (withPet) startWalk(withPet);
   });
 }
-function startWalk() {
-  if (!G.pet) return;
-  if (G.mode === 'house') { exitHouse(true); return; }
-  G.petWalking = true;
-  G.pet.setScene(G.forest);
+function startWalk(pet, quiet = false) {
+  if (!pet) return;
+  if (G.mode === 'house' && !quiet) { exitHouse(pet); return; }
+  if (G.carry && G.carry.pet === pet) { G.carry = null; G.avatar.holding = false; }
+  pet.setScene(G.forest);
   const p = G.player;
-  G.pet.pos.set(p.pos.x - Math.sin(p.yaw) * 1.5, 0, p.pos.z - Math.cos(p.yaw) * 1.5);
-  G.pet.pos.y = height(G.pet.pos.x, G.pet.pos.z);
-  G.pet.startWalk();
-  toast(`${S.pet.name}(이)랑 산책해요! ✨ 버튼을 눌러 봐요`, 3200);
+  pet.walkIdx = walkers().length;
+  pet.pos.set(p.pos.x - Math.sin(p.yaw) * 1.5, 0, p.pos.z - Math.cos(p.yaw) * 1.5);
+  pet.pos.y = height(pet.pos.x, pet.pos.z);
+  pet.startWalk();
+  G.walkPet = pet;
+  if (!quiet) toast(`${pet.data.name}(이)랑 산책해요! ✨ 버튼을 눌러 봐요`, 3200);
   refreshButtons();
 }
-function endWalk() {
-  if (!G.pet || !G.petWalking) return;
-  G.petWalking = false;
-  G.pet.goHome(); G.pet.setScene(G.house.scene);
-  const s = G.house.randomSpot(); G.pet.pos.set(s.x, 0, s.z);
-  toast(`${S.pet.name}(이)가 집으로 돌아갔어요`);
+function endWalk(pet) {
+  const list = pet ? [pet] : walkers();
+  for (const p of list) {
+    p.goHome(); p.setScene(G.house.scene);
+    const s = G.house.randomSpot(); p.pos.set(s.x, 0, s.z);
+  }
+  walkers().forEach((p, i) => p.walkIdx = i);
+  if (list.length) toast(list.length > 1 ? '모두 집으로 돌아갔어요' : `${list[0].data.name}(이)가 집으로 돌아갔어요`);
   refreshButtons();
 }
 
 // 잠자기 (지금은 혼자 접속이라 내가 자면 바로 아침)
 function sleep() {
   if (!G.dn.isNight) { const l = G.dn.label(); toast(`밤에만 잘 수 있어요 (${l.text})`); return; }
+  if (G.carry) dropCarry();
   const bed = G.house.bedItem();
   sfx.sleep();
   G.sleeping = true;
@@ -242,6 +296,81 @@ function sleep() {
   }, 1300);
 }
 
+// ───────── 안고 다니기 ─────────
+// G.carry : { kind: 'pet', pet } | { kind: 'wild', obj, data } | { kind: 'home', obj, view } | { kind: 'egg', obj, data }
+function pickUp(c) {
+  if (G.carry) { toast('먼저 들고 있는 걸 내려놓아요'); return false; }
+  if (G.player.riding) { toast('탈것에서 내려서 안아요'); return false; }
+  G.carry = c;
+  G.avatar.holding = true;
+  sfx.happy();
+  refreshButtons();
+  return true;
+}
+function carryPos() {
+  const p = G.player;
+  return new THREE.Vector3(p.pos.x + Math.sin(p.yaw) * 0.42, p.pos.y + 0.62, p.pos.z + Math.cos(p.yaw) * 0.42);
+}
+function updateCarry() {
+  const c = G.carry; if (!c) return;
+  const pos = carryPos();
+  if (c.kind === 'pet') { c.pet.pos.copy(pos).y -= 0.25; c.pet.yaw = G.player.yaw; }
+  else { c.obj.position.copy(pos); c.obj.rotation.y = G.player.yaw; }
+}
+function frontSpot() {
+  const p = G.player;
+  const v = new THREE.Vector3(p.pos.x + Math.sin(p.yaw) * 0.9, 0, p.pos.z + Math.cos(p.yaw) * 0.9);
+  if (G.mode === 'house') G.house.collide(v, 0.3); else v.y = height(v.x, v.z);
+  return v;
+}
+function dropCarry() {
+  const c = G.carry; if (!c) return;
+  const inHouse = G.mode === 'house';
+  if (c.kind === 'egg') {
+    if (!inHouse) { toast('알은 집에 가져가서 둥지에 놓아요 🪺'); return; }
+    const nest = nearestNest();
+    if (!nest) { toast('둥지가 없어요. 꾸미기에서 🪺 둥지를 놓아 주세요'); return; }
+    placeEgg(nest); return;
+  }
+  const at = frontSpot();
+  if (c.kind === 'pet') {
+    c.pet.pos.copy(at);
+    c.pet.putDown(!inHouse);
+    if (!inHouse) { c.pet.walkIdx = walkers().length - 1; G.walkPet = c.pet; }
+  } else if (c.kind === 'wild') {
+    if (c.obj.parent) c.obj.parent.remove(c.obj);
+    if (inHouse) {
+      // 집에 데려온 까치는 내 까치, 참새는 손님
+      const b = c.data.kind === 'magpie' ? G.birds.addBird('magpie', c.data.color, { name: '까치' }) : G.birds.addBird('sparrow', 'brown', { guest: true });
+      const v = G.birds.buildView(b); v.root.position.copy(at);
+      if (c.data.kind === 'magpie') toast('까치가 우리 집 식구가 되었어요! 꾹 눌러 이름을 지어 줘요', 3500);
+    } else G.wild.release(c.data.kind, c.data.color, carryPos());
+  } else if (c.kind === 'home') {
+    if (!inHouse) {
+      // 집 새를 밖에서 놓아주면 날아서 집으로 돌아감
+      if (c.obj.parent) c.obj.parent.remove(c.obj);
+      G.house.scene.add(c.obj);
+      G.birds.putBack(c.view, new THREE.Vector3(0, 0, 0));
+      toast(`${c.view.b.name || '새'}(이)가 날아서 집으로 돌아갔어요`);
+    } else G.birds.putBack(c.view, at);
+  }
+  G.carry = null; G.avatar.holding = false; sfx.place();
+  refreshButtons();
+}
+function nearestNest() {
+  let best = null, bd = 1e9;
+  for (const n of G.house.items.filter(i => i.userData.kind === 'nest')) { const d = n.position.distanceTo(G.player.pos); if (d < bd) { bd = d; best = n; } }
+  return best;
+}
+function placeEgg(nest) {
+  const c = G.carry;
+  if (c.obj.parent) c.obj.parent.remove(c.obj);
+  G.birds.addEgg(c.data.color, nest.userData.data.uid);
+  G.carry = null; G.avatar.holding = false; sfx.place();
+  toast('둥지에 알을 놓았어요 🪺 10분 뒤에 아기 까치가 태어나요', 3500);
+  refreshButtons();
+}
+
 // ───────── 버튼 ─────────
 function refreshButtons() {
   const p = G.player;
@@ -251,7 +380,10 @@ function refreshButtons() {
   $('btn-up').style.display = $('btn-down').style.display = r === 'plane' ? '' : 'none';
   $('btn-dismount').style.display = r ? '' : 'none';
   const sp = $('btn-special');
-  if (G.pet && G.petWalking && G.mode === 'forest') { sp.style.display = ''; sp.textContent = G.pet.specialLabel(); sp.style.width = 'auto'; sp.style.padding = '0 14px'; sp.style.borderRadius = '29px'; sp.style.fontSize = '16px'; }
+  const wk = G.pets && mainWalker();
+  $('btn-drop').style.display = G.carry ? '' : 'none';
+  if (G.carry) $('btn-drop').textContent = G.carry.kind === 'egg' ? '🪺 둥지에 놓기' : '⬇️ 내려놓기';
+  if (wk && G.mode === 'forest') { sp.style.display = ''; sp.textContent = wk.specialLabel(); sp.style.width = 'auto'; sp.style.padding = '0 14px'; sp.style.borderRadius = '29px'; sp.style.fontSize = '16px'; }
   else sp.style.display = 'none';
 }
 onPress($('btn-jump'), () => { unlockAudio(); G.player.jump(); });
@@ -270,9 +402,11 @@ onPress($('btn-dismount'), () => {
   if (r === 'landing') toast('천천히 내려가요 ✈️');
   refreshButtons();
 });
+onPress($('btn-drop'), () => dropCarry());
 onPress($('btn-special'), () => {
-  if (!G.pet) return;
-  const msg = G.pet.special();
+  const wk = mainWalker();
+  if (!wk) return;
+  const msg = wk.special();
   if (msg) toast(msg);
   refreshButtons();
 });
@@ -288,31 +422,54 @@ onPress($('btn-chat'), () => openPanel('💬 친구들 단톡방', body => {
   body.appendChild(el('div', 'p-info', '🚧 친구 기능은 곧 열려요!'));
 }));
 
-// 반려동물
-onPress($('btn-pet'), () => S.pet ? petInfoPanel() : adoptPanel());
-function adoptPanel() {
-  const pickSel = { type: null, color: null };
-  openPanel('🐾 반려동물 입양하기', body => {
+// 반려동물 (종류마다 한 마리씩)
+onPress($('btn-pet'), () => petListPanel());
+function petListPanel() {
+  openPanel('🐾 우리 집 동물들', body => {
+    if (!G.pets.length) body.appendChild(el('div', 'p-info', '아직 반려동물이 없어요. 입양해 볼까요?'));
     const grid = el('div', 'grid');
-    const btn = el('button', 'p-btn', '이 친구로 입양할래요');
+    G.pets.forEach(pet => {
+      const def = pet.def;
+      const where = pet.sub === 'carried' ? '안고 있어요' : pet.mode === 'walk' ? '산책 중' : '집에 있어요';
+      const card = el('div', 'card', `<div class="emo">${def.emo}</div><div>${pet.data.name}</div><small>${where}${pet.data.sick ? ' 🤒' : ''}</small>`);
+      card.onclick = () => petInfoPanel(pet);
+      grid.appendChild(card);
+    });
+    const mine = G.birds.mine().filter(b => !b.away);
+    mine.forEach(b => grid.appendChild(el('div', 'card', `<div class="emo">${b.stage === 'egg' ? '🥚' : '🐦'}</div><div>${b.stage === 'egg' ? '까치 알' : b.name || '까치'}</div><small>${b.stage === 'egg' ? '둥지에서 기다려요' : b.stage === 'baby' ? '아기 까치' : '어른 까치'}</small>`)));
+    body.appendChild(grid);
+    const row = el('div', 'center');
+    if (PETS.some(p => !G.pets.some(x => x.def.id === p.id))) { const ad = el('button', 'p-btn', '➕ 새 친구 입양하기'); ad.onclick = () => adoptPanel(); row.appendChild(ad); }
+    if (walkers().length) { const ew = el('button', 'p-btn green', '🏠 모두 산책 끝내기'); ew.onclick = () => { closePanel(); endWalk(); }; row.appendChild(ew); }
+    body.appendChild(row);
+    body.appendChild(el('div', 'p-info', '같은 동물은 한 마리씩만 키울 수 있어요 (까치는 여러 마리 가능).<br>동물을 두 번 톡톡 누르면 안아 줄 수 있어요.'));
+  });
+}
+// replace : 바꿀 펫 (다른 동물로 바꾸기)
+function adoptPanel(replace = null) {
+  const pickSel = { type: null, color: null };
+  const owned = new Set(G.pets.filter(p => p !== replace).map(p => p.def.id));
+  openPanel(replace ? `🔄 ${replace.data.name}(을)를 다른 동물로` : '🐾 반려동물 입양하기', body => {
+    const grid = el('div', 'grid');
+    const btn = el('button', 'p-btn', replace ? '이 동물로 바꿀래요' : '이 친구로 입양할래요');
     btn.disabled = true; btn.style.opacity = 0.5;
-    PETS.forEach(p => {
+    PETS.filter(p => !owned.has(p.id)).forEach(p => {
       const card = el('div', 'card', `<div class="emo">${p.emo}</div><div>${p.name}</div>`);
       const sws = el('div', 'sws');
       p.colors.forEach(([cid, cname, hex]) => {
-        const s = el('button', 'sw');
-        s.style.background = cid === 'rainbow' ? 'conic-gradient(#e8433f 0 33%, #ffd84d 0 66%, #3a6bd5 0)' : hexCss(hex);
-        s.title = cname;
-        s.onclick = ev => {
+        const sw = el('button', 'sw');
+        sw.style.background = cid === 'rainbow' ? 'conic-gradient(#e8433f 0 33%, #ffd84d 0 66%, #3a6bd5 0)' : hexCss(hex);
+        sw.title = cname;
+        sw.onclick = ev => {
           ev.stopPropagation();
           grid.querySelectorAll('.card').forEach(c => c.classList.remove('on'));
           grid.querySelectorAll('.sw').forEach(c => c.classList.remove('on'));
-          card.classList.add('on'); s.classList.add('on');
+          card.classList.add('on'); sw.classList.add('on');
           pickSel.type = p.id; pickSel.color = cid; sfx.click();
           btn.disabled = false; btn.style.opacity = 1;
-          btn.textContent = `${cname} ${p.name} 입양할래요`;
+          btn.textContent = replace ? `${cname} ${p.name}(으)로 바꿀래요` : `${cname} ${p.name} 입양할래요`;
         };
-        sws.appendChild(s);
+        sws.appendChild(sw);
       });
       card.onclick = () => sws.firstChild.onclick({ stopPropagation() {} });
       card.appendChild(sws);
@@ -324,38 +481,90 @@ function adoptPanel() {
       if (!pickSel.type) return;
       const def = PETS.find(p => p.id === pickSel.type);
       closePanel();
-      const name = await prompt(`${def.name} 이름을 지어 주세요`, def.name);
+      const name = await prompt(`${def.name} 이름을 지어 주세요`, replace ? replace.data.name : def.name);
       const now = Date.now();
-      S.pet = { type: def.id, color: pickSel.color, name: name || def.name, adoptedAt: now, lastFed: now, lastPetted: now, bowlFull: false, sick: false };
-      createPet();
-      persist();
-      sfx.happy();
-      toast(`${S.pet.name}(이)가 우리 집에 왔어요! 🏠`, 3200);
+      if (replace) {
+        // 이름, 배부름, 행복은 그대로 두고 동물만 바꿈
+        const d = replace.data;
+        if (G.carry && G.carry.pet === replace) { G.carry = null; G.avatar.holding = false; }
+        const wasWalking = replace.mode === 'walk';
+        const pos = replace.pos.clone();
+        replace.goHome();
+        if (replace.scene) replace.scene.remove(replace.root);
+        G.pets = G.pets.filter(p => p !== replace);
+        d.type = def.id; d.color = pickSel.color; d.name = name || d.name;
+        const np = createPet(d);
+        if (wasWalking) startWalk(np, true); else np.pos.copy(pos);
+        toast(`${d.name}(이)가 ${def.name}(으)로 바뀌었어요! ✨`, 3200);
+      } else {
+        const d = { uid: uid(), type: def.id, color: pickSel.color, name: name || def.name, adoptedAt: now, lastFed: now, lastPetted: now, sick: false };
+        S.pets.push(d);
+        createPet(d);
+        toast(`${d.name}(이)가 우리 집에 왔어요! 🏠`, 3200);
+        const h = homeFor(def.id);
+        if (h) setTimeout(() => toast(`꾸미기에서 ${h.emo} ${h.name}을(를) 놓아 주면 거기서 놀고 자요`, 3500), 3400);
+      }
+      G.house.setPets(S.pets);
+      persist(); sfx.happy();
     };
   });
 }
-function petInfoPanel() {
-  const pet = G.pet, d = S.pet, def = PETS.find(p => p.id === d.type);
+function petInfoPanel(pet) {
+  const d = pet.data, def = pet.def;
   openPanel(`${def.emo} ${d.name}`, body => {
     const hf = pet.hoursSinceFed, hp = pet.hoursSincePet;
     const food = hf < 3 ? '😋 배불러요' : hf < 12 ? '🙂 조금 배고파요' : '😢 배고파요';
     const mood = hp < 3 ? '💖 행복해요' : hp < 12 ? '🙂 좋아요' : '🥺 쓰다듬어 줘요';
-    const stat = el('div', 'pet-stat', `<span>${food}</span><span>${mood}</span>${d.sick ? '<span>🤒 아파요 (밥 주고 쓰다듬어 주면 나아요)</span>' : ''}`);
-    body.appendChild(stat);
-    body.appendChild(el('div', 'p-info', `집에 있는 밥그릇을 누르면 ${def.foodName}${def.food}을(를) 챙겨 줄 수 있어요.<br>${d.name}(이)를 톡 누르면 쓰다듬고, 꾹 누르면 이름을 바꿔요.`));
+    body.appendChild(el('div', 'pet-stat', `<span>${food}</span><span>${mood}</span>${d.sick ? '<span>🤒 아파요 (밥 주고 쓰다듬어 주면 나아요)</span>' : ''}`));
+    body.appendChild(el('div', 'p-info', `집에 있는 밥그릇을 누르면 ${def.foodName}${def.food}을(를) 챙겨 줄 수 있어요.<br>${d.name}(이)를 톡 누르면 쓰다듬고, 두 번 톡톡 누르면 안아요. 꾹 누르면 이름을 바꿔요.`));
     const row = el('div', 'center');
-    const walk = el('button', 'p-btn green', G.petWalking ? '🏠 산책 끝내기' : '🌲 산책 가기');
-    walk.onclick = () => { closePanel(); G.petWalking ? endWalk() : startWalk(); };
+    const walking = pet.mode === 'walk';
+    const walk = el('button', 'p-btn green', walking ? '🏠 산책 끝내기' : '🌲 산책 가기');
+    walk.onclick = () => { closePanel(); walking ? endWalk(pet) : startWalk(pet); };
     const rn = el('button', 'p-btn', '✏️ 이름 바꾸기');
-    rn.onclick = async () => { closePanel(); renamePet(); };
-    row.append(walk, rn);
+    rn.onclick = () => { closePanel(); renamePet(pet); };
+    const ch = el('button', 'p-btn gray', '🔄 다른 동물로 바꾸기');
+    ch.onclick = () => adoptPanel(pet);
+    row.append(walk, rn, ch);
     body.appendChild(row);
   });
 }
-async function renamePet() {
-  if (!G.pet) return;
-  const name = await prompt('새 이름을 지어 주세요', S.pet.name);
-  if (name) { G.pet.setName(name); persist(); toast(`이제 이름은 ${name}!`); }
+async function renamePet(pet) {
+  const name = await prompt('새 이름을 지어 주세요', pet.data.name);
+  if (name) { pet.setName(name); persist(); toast(`이제 이름은 ${name}!`); }
+}
+async function renameBird(b) {
+  const name = await prompt('까치 이름을 지어 주세요', b.name || '까치');
+  if (name) { G.birds.rename(b, name); toast(`이제 이름은 ${name}!`); }
+}
+
+// 창문 (집 안에서)
+onPress($('btn-window'), () => windowPanel());
+const WIN_NAMES = { fl: '문 왼쪽 창문', fr: '문 오른쪽 창문', l: '왼쪽 벽 창문', r: '오른쪽 벽 창문', b: '뒤쪽 벽 창문' };
+function windowPanel() {
+  openPanel('🪟 창문과 커튼', body => {
+    const list = el('div', '');
+    list.style.cssText = 'display:flex;flex-direction:column;gap:6px';
+    for (const [k, nm] of Object.entries(WIN_NAMES)) {
+      const st = S.windows[k];
+      const row = el('div', 'center');
+      row.style.cssText += ';justify-content:space-between;gap:6px';
+      const lb = el('span', '', nm); lb.style.cssText = 'min-width:110px;font-weight:bold';
+      const w = el('button', 'p-btn' + (st.open ? ' green' : ' gray'), st.open ? '🪟 열림' : '🪟 닫힘');
+      w.onclick = () => { st.open = !st.open; sfx.click(); applyWindowState(); windowPanel(); };
+      const c = el('button', 'p-btn' + (st.cur ? ' green' : ' gray'), st.cur ? '커튼 열림' : '커튼 닫힘');
+      c.onclick = () => { st.cur = !st.cur; sfx.click(); applyWindowState(); windowPanel(); };
+      row.append(lb, w, c); list.appendChild(row);
+    }
+    body.appendChild(list);
+    body.appendChild(el('div', 'p-info', '창문을 열면 바깥이 보여요. 창문과 커튼이 다 열려 있으면 까치가 밖으로 날아갈 수 있어요.<br>창문을 열어 두고 나가면 참새가 들어오기도 해요.'));
+  });
+}
+function toggleWindowTap(key) {
+  const st = S.windows[key];
+  if (!st.cur) st.cur = true; else st.open = !st.open;
+  sfx.click(); applyWindowState();
+  toast(!st.cur ? '커튼을 닫았어요' : st.open ? '창문을 열었어요 🌿' : '창문을 닫았어요');
 }
 
 // 탈것
@@ -395,7 +604,9 @@ onPress($('btn-setting'), () => openPanel('⚙️ 설정', body => {
   night.onclick = () => { closePanel(); G.dn.forceNight(); };
   const gfx = el('button', 'p-btn gray', GFX.level === 'high' ? '✨ 그래픽 : 예쁘게 (폰이 느리면 눌러요)' : '⚡ 그래픽 : 빠르게 (누르면 예쁘게)');
   gfx.onclick = () => { persist(); setGfx(GFX.level === 'high' ? 'low' : 'high'); location.reload(); };
-  row.append(re, night, gfx);
+  const wbtn = el('button', 'p-btn gray', `${G.weather.info.icon} 테스트 : 날씨 바꾸기`);
+  wbtn.onclick = () => { const ks = Object.keys(WEATHERS); G.weather.override = ks[(ks.indexOf(G.weather.kind) + 1) % ks.length]; closePanel(); };
+  row.append(re, night, gfx, wbtn);
   body.appendChild(row);
   body.appendChild(el('div', 'p-info', '밤은 25분마다 와요. 모두 자면 바로 아침이 되고, 안 자면 5분 뒤에 아침이 돼요.'));
 }));
@@ -414,11 +625,11 @@ function buildCatalog() {
     (i < 4 ? r1 : r2).appendChild(s);
   });
   cols.append(r1, r2); cat.appendChild(cols);
-  FURNITURE.forEach(f => {
-    const b = el('button', 'cat-item', `${f.emo}<small>${f.name}</small>`);
+  [...FURNITURE, ...PET_HOMES].forEach(f => {
+    const b = el('button', 'cat-item' + (f.for ? ' pet-home' : ''), `${f.emo}<small>${f.name}</small>`);
     b.onclick = () => {
       const s = G.house.freeSpot();
-      const item = G.house.addItem({ id: f.id, color: furnColor, x: s.x, z: s.z, rot: 0 });
+      const item = G.house.addItem({ uid: uid(), id: f.id, color: furnColor, x: s.x, z: s.z, rot: 0 });
       G.house.select(item); sfx.place();
       $('deco-edit').classList.remove('hidden');
     };
@@ -450,32 +661,96 @@ function hit(x, y, objs) {
 const ownerOf = (obj, roots) => { while (obj) { if (roots.includes(obj)) return obj; obj = obj.parent; } return null; };
 const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
+let lastTap = { o: null, t: 0, x: 0, y: 0 };
+const near = (pos, d) => Math.hypot(G.player.pos.x - pos.x, G.player.pos.z - pos.z) < d;
 input.handlers.tap = (x, y) => {
   if (G.mode === 'customize' || !G.built) return;
   unlockAudio();
-  const targets = [];
-  if (G.pet && G.pet.scene === (G.mode === 'house' ? G.house.scene : G.forest)) targets.push(G.pet.root);
+  const scene = G.mode === 'house' ? G.house.scene : G.forest;
+  const petRoots = G.pets.filter(p => p.scene === scene && p.sub !== 'carried').map(p => p.root);
+  const targets = [...petRoots];
+  let birdRoots = [], wildRoots = [];
   if (G.mode === 'house') {
     if (G.house.bowlMesh) targets.push(G.house.bowlMesh);
-    if (!G.deco) { const bed = G.house.bedItem(); if (bed) targets.push(bed); }
+    if (!G.deco) {
+      const bed = G.house.bedItem(); if (bed) targets.push(bed);
+      birdRoots = G.birds.tapTargets(); targets.push(...birdRoots);
+      targets.push(...Object.values(G.house.wins).map(w => w.group));
+      if (G.carry && G.carry.kind === 'egg') targets.push(...G.house.items.filter(i => i.userData.kind === 'nest'));
+    }
     if (G.deco) targets.push(...G.house.items);
+  } else { wildRoots = G.wild.tapTargets(); targets.push(...wildRoots); }
+  const now = performance.now();
+  // 두 번째 톡은 동물이 움직여도 같은 자리면 같은 대상으로
+  let o, dbl = false;
+  if (lastTap.o && now - lastTap.t < 420 && Math.hypot(x - lastTap.x, y - lastTap.y) < 45 && targets.includes(lastTap.o)) { o = lastTap.o; dbl = true; }
+  else {
+    const h = hit(x, y, targets);
+    if (!h) { if (G.deco) G.house.select(null); lastTap = { o: null, t: 0 }; return; }
+    o = ownerOf(h.object, targets);
   }
-  const h = hit(x, y, targets);
-  if (!h) { if (G.deco) G.house.select(null); return; }
-  const o = ownerOf(h.object, targets);
-  if (G.pet && o === G.pet.root) {
-    if (Math.hypot(G.player.pos.x - G.pet.pos.x, G.player.pos.z - G.pet.pos.z) > 6) { toast(`${S.pet.name}(이)에게 가까이 가요`); return; }
-    G.pet.pat();
-  } else if (o === G.house.bowlMesh) {
-    if (S.pet.bowlFull) toast('밥그릇이 벌써 가득해요');
-    else { G.house.fillBowl(); sfx.eat(); const def = PETS.find(p => p.id === S.pet.type); toast(`${def.foodName}${def.food}을(를) 담았어요. 배고프면 먹을 거예요`); }
-  } else if (G.deco) { G.house.select(o); }
-  else if (o && o.userData.kind === 'bed') sleep();
+  lastTap = { o: dbl ? null : o, t: now, x, y };
+
+  const pet = G.pets.find(p => p.root === o);
+  if (pet) {
+    if (!near(pet.pos, 6)) { toast(`${pet.data.name}(이)에게 가까이 가요`); return; }
+    if (!dbl) { pet.pat(); return; }
+    // 두 번 톡톡 : 앵무새는 팔 ↔ 바닥, 다른 동물은 안기
+    if (pet.def.id === 'parrot' && pet.mode === 'walk' && (pet.sub === 'perch' || pet.groundWalk)) { const m = pet.toggleGround(); if (m) toast(m); return; }
+    if (pickUp({ kind: 'pet', pet })) { pet.pickUp(); toast(`${pet.data.name}(을)를 안았어요 🤗`); }
+    return;
+  }
+  if (birdRoots.includes(o)) {
+    const v = G.birds.viewOfRoot(o);
+    if (!v) return;
+    if (v.b.stage === 'egg') { toast(`아기 까치가 태어나기까지 ${Math.max(1, Math.ceil(10 - (Date.now() - v.b.placedAt) / 60000))}분 남았어요 🥚`); return; }
+    if (dbl) { if (pickUp({ kind: 'home', obj: v.root, view: v })) { G.birds.take(v); toast(`${v.b.name || '새'}(을)를 안았어요 🤗`); } }
+    else { sfx.tweet(0.06); G.floatH.add('💗', v.root.position.clone().add(new THREE.Vector3(0, 0.6, 0)), 0.4); }
+    return;
+  }
+  if (wildRoots.includes(o)) {
+    if (o.userData.wildEgg) {
+      if (!near(o.getWorldPosition(new THREE.Vector3()), 8)) { toast('알에 조금 더 가까이 가요'); return; }
+      if (G.carry) { toast('먼저 들고 있는 걸 내려놓아요'); return; }
+      const data = G.wild.takeEgg(o);
+      const egg = makeEgg(); G.forest.add(egg);
+      pickUp({ kind: 'egg', obj: egg, data });
+      toast('까치 알을 들었어요! 집에 가서 🪺 둥지에 놓아요', 3500);
+      return;
+    }
+    if (!near(o.position, 5)) { toast('조금 더 가까이 가요'); return; }
+    if (dbl) {
+      const data = G.wild.takeBird(o);
+      if (data) { G.forest.add(o); if (pickUp({ kind: 'wild', obj: o, data })) toast(data.kind === 'magpie' ? '까치를 안았어요! 집에 데려가면 함께 살아요' : '참새를 안았어요 🐦'); }
+    } else sfx.tweet(0.05);
+    return;
+  }
+  if (o === G.house.bowlMesh) {
+    if (!G.pets.length) { toast('먼저 반려동물을 입양해요'); return; }
+    if (G.house.bowlFull) toast('밥그릇이 벌써 가득해요');
+    else { G.house.fillBowl(G.pets.length); sfx.eat(); toast(G.pets.length > 1 ? '모두 먹을 만큼 밥을 담았어요. 배고프면 먹을 거예요' : `${G.pets[0].def.foodName}${G.pets[0].def.food}을(를) 담았어요. 배고프면 먹을 거예요`); }
+    return;
+  }
+  if (G.deco) { G.house.select(o); return; }
+  if (o && o.userData.kind === 'nest' && G.carry && G.carry.kind === 'egg') { placeEgg(o); return; }
+  if (o && o.userData.win) { toggleWindowTap(o.userData.win); return; }
+  if (o && o.userData.kind === 'bed') sleep();
 };
 input.handlers.longpress = (x, y) => {
-  if (!G.pet || G.mode === 'customize') return;
-  const h = hit(x, y, [G.pet.root]);
-  if (h) renamePet();
+  if (G.mode === 'customize' || !G.built) return;
+  const scene = G.mode === 'house' ? G.house.scene : G.forest;
+  const roots = G.pets.filter(p => p.scene === scene).map(p => p.root);
+  const birdRoots = G.mode === 'house' ? G.birds.tapTargets() : [];
+  const winRoots = G.mode === 'house' ? Object.values(G.house.wins).map(w => w.group) : [];
+  const all = [...roots, ...birdRoots, ...winRoots];
+  const h = hit(x, y, all);
+  if (!h) return;
+  const o = ownerOf(h.object, all);
+  const pet = G.pets.find(p => p.root === o);
+  if (pet) { renamePet(pet); return; }
+  const v = G.birds.viewOfRoot(o);
+  if (v && v.b.stage !== 'egg' && v.b.kind === 'magpie') { renameBird(v.b); return; }
+  if (o && o.userData.win) { const st = S.windows[o.userData.win]; st.cur = !st.cur; sfx.click(); applyWindowState(); toast(st.cur ? '커튼을 열었어요' : '커튼을 닫았어요'); }
 };
 input.handlers.dragStart = (x, y) => {
   if (G.mode !== 'house' || !G.deco) return false;
@@ -527,14 +802,18 @@ function frame() {
   const mv = (G.sleeping) ? { x: 0, y: 0, mag: 0 } : input.getMove();
   G.dn.update(p.pos);
   const night = G.dn.night;
+  G.weather.update(dt, G.mode === 'forest' ? camera.position : p.pos);
+  updatePets(dt);
+  G.birds.update(dt);
 
   if (G.mode === 'forest') {
     G.camYaw -= look.dx * 0.006;
     G.camPitch = clamp(G.camPitch + look.dy * 0.004, 0.05, 1.2);
     p.update(dt, mv, G.camYaw, G.world);
+    pushFromAnimals(G.forest, G.wild.groundCircles());
     G.world.update(dt, G.t, night);
     G.wild.update(dt, p);
-    if (G.pet) G.pet.update(dt, G.petWalking ? G.world : G.house.env, G.house);
+    updateCarry();
     G.floatF.update(dt);
 
     // 카메라 (뒤에서 따라감)
@@ -567,6 +846,7 @@ function frame() {
       }
       if (best < 1) { const k = Math.max(0.18, best); camera.position.set(ox + vx * k, Math.max(camera.position.y * k + camTarget.y * (1 - k), height(ox + vx * k, oz + vz * k) + 0.6), oz + vz * k); }
     }
+    canopyClear();
     camera.lookAt(camTarget);
 
     // 집 문 앞
@@ -577,8 +857,9 @@ function frame() {
     G.houseYaw = clamp(G.houseYaw - look.dx * 0.004, -0.7, 0.7);
     if (!G.sleeping) p.update(dt, mv, G.houseYaw, G.house.env);
     else p.avatar.update(dt, 0, false);
-    G.house.update(dt, night);
-    if (G.pet) G.pet.update(dt, G.house.env, G.house);
+    if (!G.sleeping) pushFromAnimals(G.house.scene, G.birds.groundCircles());
+    G.house.update(dt, night, G.weather);
+    updateCarry();
     G.floatH.update(dt);
     camTarget.set(p.pos.x * 0.5, 1, p.pos.z * 0.4 - 0.5);
     const dist = 12.5, pitch = 0.68;
@@ -596,7 +877,56 @@ function frame() {
     const l = G.dn.label();
     $('clock-icon').textContent = l.icon; $('clock-text').textContent = l.text;
     refreshButtons();
-    if (G.pet) G.pet.checkHealth();
+    G.pets.forEach(pt => pt.checkHealth());
+    $('weather-icon').textContent = G.weather.info.icon;
+  }
+}
+
+// 모든 펫 움직이기 (집에 있는 펫은 내가 밖에 있어도 움직임)
+function updatePets(dt) {
+  for (const pt of G.pets) pt.update(dt, pt.mode === 'walk' ? G.world : G.house.env, G.house);
+  // 펫끼리 겹치지 않게
+  for (let i = 0; i < G.pets.length; i++) for (let j = i + 1; j < G.pets.length; j++) {
+    const a = G.pets[i], b = G.pets[j];
+    if (a.scene !== b.scene || !a.onGround || !b.onGround) continue;
+    const dx = b.pos.x - a.pos.x, dz = b.pos.z - a.pos.z, d = Math.hypot(dx, dz), rr = 0.6;
+    if (d < rr && d > 1e-4) { const k = (rr - d) / d / 2; a.pos.x -= dx * k; a.pos.z -= dz * k; b.pos.x += dx * k; b.pos.z += dz * k; }
+  }
+}
+// 동물을 통과하지 않고 부딪히기
+function pushFromAnimals(scene, extra = []) {
+  const p = G.player.pos;
+  if (G.player.riding === 'plane') return;
+  const circles = [...extra];
+  for (const pt of G.pets) if (pt.scene === scene && pt.onGround) circles.push({ x: pt.pos.x, z: pt.pos.z, r: pt.def.id === 'chick' || pt.def.id === 'parrot' ? 0.25 : 0.38, y: pt.pos.y });
+  for (const c of circles) {
+    if (c.y !== undefined && Math.abs(c.y - p.y) > 0.8) continue;
+    const dx = p.x - c.x, dz = p.z - c.z, d = Math.hypot(dx, dz), rr = c.r + 0.38;
+    if (d < rr && d > 1e-4) { p.x = c.x + dx / d * rr; p.z = c.z + dz / d * rr; }
+  }
+}
+// 카메라가 나뭇잎 속에 들어가면 나무 밖으로 당김
+const _cv = new THREE.Vector3();
+function inCanopy(tr, x, y, z) {
+  let cy, rx, ry;
+  if (tr.type === 'pine') { const s = tr.h / 6.6; cy = tr.y + 3.6 * s; rx = 2.1 * s; ry = 2.8 * s; }
+  else { cy = tr.y + tr.cy; rx = tr.cr * 1.15; ry = tr.cry * 1.15; }
+  const dx = (x - tr.x) / rx, dy = (y - cy) / ry, dz = (z - tr.z) / rx;
+  return dx * dx + dy * dy + dz * dz < 1;
+}
+function canopyClear() {
+  const c = camera.position;
+  for (const tr of G.world.trees) {
+    if (Math.abs(tr.x - c.x) > 5 || Math.abs(tr.z - c.z) > 5) continue;
+    if (!inCanopy(tr, c.x, c.y, c.z)) continue;
+    // 플레이어 쪽으로 반씩 좁혀 가며 잎 밖 지점 찾기
+    let lo = 0, hi = 1;
+    for (let i = 0; i < 8; i++) {
+      const m = (lo + hi) / 2;
+      _cv.lerpVectors(camTarget, c, m);
+      if (inCanopy(tr, _cv.x, _cv.y, _cv.z)) hi = m; else lo = m;
+    }
+    c.lerpVectors(camTarget, c.clone(), Math.max(0.15, lo * 0.95));
   }
 }
 function setContext(c) {
@@ -616,4 +946,4 @@ frame();
 if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('sw.js').catch(() => {});
 
 // 테스트용 핸들 (개발자 도구에서 사용)
-window.__T = { G, S, startWalk, endWalk, enterHouse, exitHouse, sleep, createPet, persist };
+window.__T = { camera, input, G, S, startWalk, endWalk, enterHouse, exitHouse, sleep, createPet, persist, pickUp, dropCarry, applyWindowState, sparrowVisit };

@@ -161,6 +161,7 @@ export class Avatar {
       bob = Math.sin(t * 2) * 0.015;
     }
     if (this.perch) { A[0].rotation.x = -0.2; A[0].rotation.z = -1.35; }
+    if (this.holding) A.forEach((a, i) => { a.rotation.x = -1.25; a.rotation.z = (i ? -1 : 1) * 0.35; });
     this.model.position.set(0, bob, 0);
     this.head.rotation.z = Math.sin(t * 1.3) * 0.03;
     // 머리카락 흔들림
