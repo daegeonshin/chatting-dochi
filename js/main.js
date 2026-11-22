@@ -51,7 +51,7 @@ function resize() {
 addEventListener('resize', resize);
 
 const input = new Input(canvas);
-const G = { mode: 'customize', camYaw: Math.PI, camPitch: 0.42, houseYaw: 0, housePitch: 0.5, t: 0, deco: false, drag: null, pet: null, petWalking: false, built: false };
+const G = { mode: 'customize', camYaw: Math.PI, camPitch: 0.42, houseYaw: 0, housePitch: 0.22, t: 0, deco: false, drag: null, pet: null, petWalking: false, built: false };
 
 // ───────── 캐릭터 꾸미기 ─────────
 const draft = S.profile ? { ...S.profile } : { name: '', houseName: '', houseColor: 'sky', hair: 'twin', hairColor: 'brown', eye: 'darkbrown', cloth: 'lilac' };
@@ -239,7 +239,7 @@ function enterHouse() {
     G.forest.remove(G.player.root);
     G.house.scene.add(G.player.root);
     G.player.pos.set(0, 0, ROOM.d / 2 - 1.3); G.player.yaw = Math.PI; G.player.vy = 0;
-    G.houseYaw = 0; G.houseCamReset = true;
+    G.houseYaw = 0; G.housePitch = 0.22; G.houseCamReset = true;
     walkers().forEach((pet, i) => { pet.goHome(); pet.setScene(G.house.scene); pet.pos.set(1.2 - i * 0.8, 0, ROOM.d / 2 - 1.5); });
     moveCarryTo(G.house.scene);
     G.walkPet = null;
@@ -1156,11 +1156,12 @@ function frame() {
     updateCarry();
     G.floatH.update(dt);
     // 넓은 집 : 카메라가 나를 따라다니고, 가리는 벽은 흐려짐
-    const goalT = new THREE.Vector3(p.pos.x, 1.2, p.pos.z);
+    // 캐릭터 조금 앞을 바라봄 (앞이 잘 보이게)
+    const goalT = new THREE.Vector3(p.pos.x - Math.sin(G.houseYaw) * 1.5, 1.35, p.pos.z - Math.cos(G.houseYaw) * 1.5);
     if (G.houseCamReset) { camTarget.copy(goalT); G.houseCamReset = false; } else camTarget.lerp(goalT, 1 - Math.pow(0.0001, dt));
     // 꾸미기 중에는 위에서 넓게, 평소에는 숲처럼 뒤에서 (높이에 따라 거리도 늘어남)
     const pitch = G.deco ? Math.max(G.housePitch, 0.95) : G.housePitch;
-    let dist = G.deco ? 12 : 5.2 + pitch * 5;
+    let dist = G.deco ? 12 : 5.6 + pitch * 4.5;
     const dir = new THREE.Vector3(Math.sin(G.houseYaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(G.houseYaw) * Math.cos(pitch));
     // 바깥벽 밖으로 나가지 않게 (앞쪽은 열려 있어 조금 여유)
     for (let k = 0; k < 12; k++) {
