@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { HAIR_STYLES, HAIR_COLORS, EYE_COLORS, COLORS7, PETS, VEHICLES, FURNITURE, FURN_COLORS } from './data.js';
 import { load, save } from './save.js';
 import { Avatar } from './avatar.js';
-import { World, height, HOUSE_POS, setHouseSlot } from './world.js';
+import { World, height, HOUSE_POS, setHouseSlot, HOUSE_W, HOUSE_D } from './world.js';
 import { Net, normCode, validCode, MAX_SLOTS } from './net.js';
 import { Friends, packMe } from './friends.js';
 import { cleanChat } from './chatfilter.js';
@@ -77,8 +77,8 @@ function rebuildPreview() {
   if (preview.house) preview.scene.remove(preview.house);
   const tmp = { windowMat: null, houseLabel: null };
   preview.house = World.prototype.makeHouse.call(tmp, draft.houseColor, draft.houseName || '');
-  preview.house.scale.setScalar(0.32);
-  preview.house.position.set(1.6, 0, -1.6);
+  preview.house.scale.setScalar(0.2);
+  preview.house.position.set(1.7, 0, -1.8);
   preview.house.rotation.y = -0.5;
   preview.scene.add(preview.house);
 }
@@ -157,7 +157,7 @@ function startGame() {
   G.house.applyWindows(S.windows);
   G.floatH = new Floaters(G.house.scene);
   G.birds = new HomeBirds(G.house, S, { toast, onSave: persist, inHouse: () => G.mode === 'house', raining: () => G.weather.raining });
-  G.player.pos.set(HOUSE_POS.x, 0, HOUSE_POS.z + 5);
+  G.player.pos.set(HOUSE_POS.x, 0, HOUSE_POS.z + HOUSE_D / 2 + 3);
   G.player.yaw = 0; G.camYaw = 0.5;
   camTarget.set(G.player.pos.x, 1.3, G.player.pos.z);
   G.forest.add(G.player.root);
@@ -190,7 +190,8 @@ function startGame() {
 // 집 밖 창문 위치 (참새가 날아 들어가는 곳)
 function windowWorld(key) {
   if (key === 'g' && G.world.greenWin) return G.world.greenWin.clone();
-  const o = { fl: [-1.6, 2.6], fr: [1.6, 2.6], l: [-2.9, 0], r: [2.9, 0], b: [0, -2.6] }[key] || [0, 2.6];
+  const hw = HOUSE_W / 2 + 0.4, hd = HOUSE_D / 2 + 0.4;
+  const o = { fl: [-2.2, hd], fr: [2.2, hd], l: [-hw, -1.6], r: [hw, -1.6], b: [0, -hd] }[key] || [0, hd];
   return new THREE.Vector3(HOUSE_POS.x + o[0], 1.9, HOUSE_POS.z + o[1]);
 }
 // 창문을 열어 두고 나가면 가끔 참새가 들어오고, 바람에 창문이 닫히면 못 나감

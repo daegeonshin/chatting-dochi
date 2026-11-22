@@ -8,9 +8,12 @@ export const VILLAGE = { x: 0, z: 0, r: 24 };
 export const MEADOW = { x: 58, z: -32, r: 28 };
 export const POND = { x: -52, z: 30, r: 13 };
 export const WATER_Y = -0.35;
-export const HOUSE_POS = { x: 0, z: -13 }; // 내 집 (광장 쪽을 바라봄)
+export const HOUSE_POS = { x: 0, z: -16 }; // 내 집 (광장 쪽을 바라봄)
 // 친구 방의 집 자리 (0번은 방장). 모두 +z(광장 쪽)를 바라보고, 길과 겹치지 않는 평평한 곳
-export const SLOTS = [[0, -13], [-9, -11], [9, -11], [-18, -12], [-17, 4]];
+// 큰 집(가로 10, 세로 8)이 서로 겹치지 않고 길 위에 놓이지 않는 자리
+export const SLOTS = [[0, -16], [-12, -16], [11, -19], [-21, -2], [19, 2]];
+export const HOUSE_W = 10, HOUSE_D = 8;
+const HB = { x: HOUSE_W / 2 + 0.2, zb: HOUSE_D / 2 + 0.2, zf: HOUSE_D / 2 + 0.15, door: HOUSE_D / 2 + 1.3 }; // 충돌 상자와 문 앞
 export function setHouseSlot(n) { const p = SLOTS[n] || SLOTS[0]; HOUSE_POS.x = p[0]; HOUSE_POS.z = p[1]; }
 const ZONES = [VILLAGE, MEADOW, POND];
 
@@ -176,7 +179,8 @@ export class World {
     for (let i = 0; i < 10; i++) {
       const a = (i / 10) * Math.PI * 2 + 0.2;
       const x = Math.cos(a) * (VILLAGE.r + 0.5), z = Math.sin(a) * (VILLAGE.r + 0.5);
-      if (pathDist(x, z) > 4) spots.push({ x, z, deco: true });
+      const onLot = SLOTS.some(([sx, sz]) => Math.abs(x - sx) < HOUSE_W / 2 + 2.5 && z > sz - HOUSE_D / 2 - 4 && z < sz + HOUSE_D / 2 + 6); // 집 자리는 비움
+      if (pathDist(x, z) > 4 && !onLot) spots.push({ x, z, deco: true });
     }
 
     const pines = [], rounds = [], birches = [];
@@ -338,20 +342,20 @@ export class World {
     this.myHouse = this.makeHouse(profile.houseColor, profile.houseName);
     this.myHouse.position.set(HOUSE_POS.x, 0, HOUSE_POS.z);
     this.group.add(this.myHouse);
-    this.boxes.push({ x0: HOUSE_POS.x - 2.7, x1: HOUSE_POS.x + 2.7, z0: HOUSE_POS.z - 2.4, z1: HOUSE_POS.z + 2.35 });
-    this.door = new THREE.Vector3(HOUSE_POS.x, 0, HOUSE_POS.z + 3.2);
+    this.boxes.push({ x0: HOUSE_POS.x - HB.x, x1: HOUSE_POS.x + HB.x, z0: HOUSE_POS.z - HB.zb, z1: HOUSE_POS.z + HB.zf });
+    this.door = new THREE.Vector3(HOUSE_POS.x, 0, HOUSE_POS.z + HB.door);
 
     // 친구 집터 : 방의 집 자리(SLOTS) 중 내 자리를 뺀 곳. 친구가 들어오면 그 자리에 친구 집이 생김
     this.lots = {}; this.friendHouses = {}; this.friendWinMats = [];
     SLOTS.forEach(([x, z], n) => {
       if (x === HOUSE_POS.x && z === HOUSE_POS.z) return;
       const lot = new THREE.Group();
-      const base = mesh(new THREE.CylinderGeometry(2.6, 2.6, 0.08, 20), 0xd9ecb0); base.position.y = 0.04;
+      const base = mesh(new THREE.CylinderGeometry(4.3, 4.3, 0.08, 28), 0xd9ecb0); base.position.y = 0.04;
       lot.add(base);
-      for (let k = 0; k < 10; k++) {
-        const fa = (k / 10) * Math.PI * 2;
+      for (let k = 0; k < 16; k++) {
+        const fa = (k / 16) * Math.PI * 2;
         const fl = mesh(new THREE.SphereGeometry(0.16, 7, 5), [0xffa6c9, 0xfff27a, 0xffffff][k % 3]);
-        fl.position.set(Math.cos(fa) * 2.3, 0.2, Math.sin(fa) * 2.3); lot.add(fl);
+        fl.position.set(Math.cos(fa) * 4.0, 0.2, Math.sin(fa) * 4.0); lot.add(fl);
       }
       const sign = mesh(new THREE.BoxGeometry(0.08, 1, 0.08), 0x9a6a44); sign.position.y = 0.5; lot.add(sign);
       const label = makeLabel('친구 집 자리', '#7a5a3a', 'rgba(255,248,230,0.95)'); label.position.y = 1.25; label.scale.multiplyScalar(0.8); lot.add(label);
@@ -362,21 +366,35 @@ export class World {
   }
 
   makeHouse(colorId, name) {
+    // 큰 집 (26.11.22) : 안이 방 6개라 밖도 넓게. 문과 창문 크기는 그대로, 몸체와 창문 수를 늘림
+    const W = HOUSE_W, D = HOUSE_D, H = 3.4;
     const wall = (COLORS7.find(c => c.id === colorId) || COLORS7[0]).hex;
     const roofC = colorId === 'white' ? 0x8fb8ff : new THREE.Color(wall).offsetHSL(0.02, 0.05, -0.22).getHex();
     const g = new THREE.Group();
-    const body = mesh(new THREE.BoxGeometry(5, 3.2, 4.4), wall); body.position.y = 1.6;
-    const trim = mesh(new THREE.BoxGeometry(5.2, 0.3, 4.6), 0xffffff); trim.position.y = 0.15;
-    const roof = mesh(new THREE.ConeGeometry(4.3, 2.4, 4, 1), roofC); roof.position.y = 4.4; roof.rotation.y = Math.PI / 4; roof.scale.set(1, 1, 0.92);
-    const chimney = mesh(new THREE.BoxGeometry(0.6, 1.3, 0.6), 0xd98a7a); chimney.position.set(1.4, 4.6, -0.6);
-    const door = mesh(new THREE.BoxGeometry(1.2, 2, 0.12), 0xa0663e); door.position.set(0, 1.05, 2.22);
+    const body = mesh(new THREE.BoxGeometry(W, H, D), wall); body.position.y = H / 2;
+    const trim = mesh(new THREE.BoxGeometry(W + 0.2, 0.3, D + 0.2), 0xffffff); trim.position.y = 0.15;
+    const band = mesh(new THREE.BoxGeometry(W + 0.12, 0.18, D + 0.12), 0xffffff); band.position.y = H - 0.05;
+    // 지붕 : 네모난 모임지붕 + 앞쪽 작은 박공(다락 창)
+    const roof = mesh(new THREE.ConeGeometry(W * 0.75, 3.0, 4, 1), roofC); roof.position.y = H + 1.5; roof.rotation.y = Math.PI / 4; roof.scale.set(1, 1, (D + 0.9) / (W + 0.9));
+    const gable = mesh(new THREE.ConeGeometry(1.5, 1.6, 4, 1), roofC); gable.rotation.y = Math.PI / 4; gable.position.set(0, H + 1.05, D / 2 - 0.9); gable.scale.set(1, 1, 0.7);
+    const gableWall = mesh(new THREE.BoxGeometry(1.9, 1.0, 1.2), wall); gableWall.position.set(0, H + 0.45, D / 2 - 0.7);
+    const attic = mesh(new THREE.CircleGeometry(0.32, 16), 0xbfe8ff, { emissive: 0x000000 }); attic.position.set(0, H + 0.5, D / 2 - 0.08);
+    const atticFrame = mesh(new THREE.TorusGeometry(0.34, 0.05, 6, 16), 0xffffff); atticFrame.position.copy(attic.position);
+    const chimney = mesh(new THREE.BoxGeometry(0.8, 2.0, 0.8), 0xd98a7a); chimney.position.set(W * 0.28, H + 1.9, -D * 0.15);
+    const chimTop = mesh(new THREE.BoxGeometry(1.0, 0.2, 1.0), 0xc87a6a); chimTop.position.set(W * 0.28, H + 2.95, -D * 0.15);
+    // 현관 : 문 + 작은 지붕과 기둥
+    const fz = D / 2 + 0.02;
+    const door = mesh(new THREE.BoxGeometry(1.2, 2, 0.12), 0xa0663e); door.position.set(0, 1.05, fz);
     const doorTop = mesh(new THREE.CylinderGeometry(0.6, 0.6, 0.12, 16, 1, false, 0, Math.PI), 0xa0663e);
-    doorTop.rotation.set(Math.PI / 2, Math.PI / 2, 0); doorTop.position.set(0, 2.05, 2.22);
-    const knob = mesh(new THREE.SphereGeometry(0.07, 8, 6), 0xffd84d); knob.position.set(0.4, 1.0, 2.3);
-    const step = mesh(new THREE.BoxGeometry(1.8, 0.15, 0.8), 0xd8d0c0); step.position.set(0, 0.08, 2.6);
-    g.add(body, trim, roof, chimney, door, doorTop, knob, step);
+    doorTop.rotation.set(Math.PI / 2, Math.PI / 2, 0); doorTop.position.set(0, 2.05, fz);
+    const knob = mesh(new THREE.SphereGeometry(0.07, 8, 6), 0xffd84d); knob.position.set(0.4, 1.0, fz + 0.08);
+    const step = mesh(new THREE.BoxGeometry(2.4, 0.15, 1.1), 0xd8d0c0); step.position.set(0, 0.08, fz + 0.55);
+    const porch = mesh(new THREE.BoxGeometry(2.8, 0.16, 1.3), 0xffffff); porch.position.set(0, 2.75, fz + 0.6);
+    const porchRoof = mesh(new THREE.BoxGeometry(3.0, 0.14, 1.45), roofC); porchRoof.position.set(0, 2.9, fz + 0.62); porchRoof.rotation.x = 0.12;
+    g.add(body, trim, band, roof, gable, gableWall, attic, atticFrame, chimney, chimTop, door, doorTop, knob, step, porch, porchRoof);
+    for (const s of [-1, 1]) { const col = mesh(new THREE.CylinderGeometry(0.08, 0.08, 2.7, 8), 0xffffff); col.position.set(s * 1.25, 1.37, fz + 1.15); g.add(col); }
     this.windowMat = this.windowMat || toon({ color: 0xbfe8ff, emissive: 0x000000 });
-    // 창문 : 문 양쪽(fl, fr) + 왼쪽(l), 오른쪽(r), 뒤(b) 벽에 하나씩
+    // 창문 : 문 양쪽(fl, fr), 왼쪽(l), 오른쪽(r), 뒤(b)는 열고 닫는 창문. 나머지(d로 시작)는 장식 창문
     const wins = {};
     const makeWin = (key, x, y, z, rotY, flowers) => {
       const w = new THREE.Group(); w.position.set(x, y, z); w.rotation.y = rotY;
@@ -396,16 +414,24 @@ export class World {
       g.add(w);
       wins[key] = { panes, curtain, hole };
     };
-    makeWin('fl', -1.6, 1.9, 2.2, 0, true);
-    makeWin('fr', 1.6, 1.9, 2.2, 0, true);
-    makeWin('l', -2.5, 1.9, 0, -Math.PI / 2, false);
-    makeWin('r', 2.5, 1.9, 0, Math.PI / 2, false);
-    makeWin('b', 0, 1.9, -2.2, Math.PI, false);
+    makeWin('fl', -2.2, 1.9, fz, 0, true);
+    makeWin('fr', 2.2, 1.9, fz, 0, true);
+    makeWin('d1', -3.9, 1.9, fz, 0, true);
+    makeWin('d2', 3.9, 1.9, fz, 0, true);
+    makeWin('l', -W / 2 - 0.02, 1.9, -1.6, -Math.PI / 2, false);
+    makeWin('d3', -W / 2 - 0.02, 1.9, 1.6, -Math.PI / 2, false);
+    makeWin('r', W / 2 + 0.02, 1.9, -1.6, Math.PI / 2, false);
+    makeWin('d4', W / 2 + 0.02, 1.9, 1.6, Math.PI / 2, false);
+    makeWin('b', 0, 1.9, -D / 2 - 0.02, Math.PI, false);
+    makeWin('d5', -3, 1.9, -D / 2 - 0.02, Math.PI, false);
+    makeWin('d6', 3, 1.9, -D / 2 - 0.02, Math.PI, false);
     g.userData.wins = wins;
     if (this.winState) applyWindows(g, this.winState);
     outline(g, 0.045, 0x4a3048, 0.1);
     castAll(g, true, true);
-    if (name) { const lb = makeLabel(name, '#ffffff', 'rgba(176,80,122,0.9)'); lb.position.set(0, 3.0, 2.5); lb.scale.multiplyScalar(1.3); g.add(lb); this.houseLabel = lb; }
+    // 꽃밭 (집 앞 양옆)
+    for (const s of [-1, 1]) for (let k = 0; k < 5; k++) { const f = mesh(new THREE.SphereGeometry(0.16, 7, 5), [0xff7aa8, 0xfff27a, 0xffffff, 0xc9a7ff, 0xff9a5a][k]); f.position.set(s * (2.0 + k * 0.6), 0.18, fz + 0.45); g.add(f); }
+    if (name) { const lb = makeLabel(name, '#ffffff', 'rgba(176,80,122,0.9)'); lb.position.set(0, 3.55, fz + 1.3); lb.scale.multiplyScalar(1.3); g.add(lb); this.houseLabel = lb; }
     return g;
   }
 
@@ -418,7 +444,7 @@ export class World {
     if (this.greenhouse) { this.group.remove(this.greenhouse); this.boxes.splice(this.boxes.indexOf(this.greenhouseBox), 1); this.greenhouse = null; }
     if (!on) return;
     const g = new THREE.Group(), W = 3.6, D = 2.8, H = 2.3;
-    const cx = HOUSE_POS.x + 1.0, cz = HOUSE_POS.z - 2.2 - D / 2 - 0.05;
+    const cx = HOUSE_POS.x + 2.6, cz = HOUSE_POS.z - HOUSE_D / 2 - D / 2 - 0.25;
     const glass = new THREE.MeshBasicMaterial({ color: 0xeafff0, transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide });
     const body = new THREE.Mesh(new THREE.BoxGeometry(W, H * 0.6, D), glass); body.position.y = H * 0.3; g.add(body);
     const roof = new THREE.Mesh(new THREE.CylinderGeometry(W / 2, W / 2, D, 18, 1, true, -Math.PI / 2, Math.PI), glass); roof.rotation.x = Math.PI / 2; roof.scale.set(1, 1, 0.55); roof.position.y = H * 0.6; g.add(roof);
@@ -437,7 +463,7 @@ export class World {
     this.greenWin = new THREE.Vector3(cx + 0.6, 1.0, cz - D / 2 - 0.4);
   }
   // 마당 : 집 앞 울타리. 문(가운데)으로 사람만 드나듦, 동물은 울타리 안에서만
-  get yardRect() { return { x0: HOUSE_POS.x - 3.4, x1: HOUSE_POS.x + 3.4, z0: HOUSE_POS.z + 2.6, z1: HOUSE_POS.z + 6.4 }; } // 가로등, 벤치와 겹치지 않는 크기
+  get yardRect() { return { x0: HOUSE_POS.x - 3.4, x1: HOUSE_POS.x + 3.4, z0: HOUSE_POS.z + HOUSE_D / 2 + 1.4, z1: HOUSE_POS.z + HOUSE_D / 2 + 5.2 }; } // 가로등, 벤치와 겹치지 않는 크기
   setYard(on) {
     if (this.yard) { this.group.remove(this.yard); for (const b of this.yardBoxes) this.boxes.splice(this.boxes.indexOf(b), 1); this.yard = null; }
     if (!on) return;
@@ -452,7 +478,8 @@ export class World {
     const gx = HOUSE_POS.x, gate = 0.9;
     seg(R.x0, R.z0, R.x0, R.z1); seg(R.x1, R.z0, R.x1, R.z1);
     seg(R.x0, R.z1, gx - gate, R.z1); seg(gx + gate, R.z1, R.x1, R.z1);
-    seg(R.x0, R.z0, HOUSE_POS.x - 2.7, R.z0); seg(HOUSE_POS.x + 2.7, R.z0, R.x1, R.z0);
+    // 뒤쪽은 현관 기둥 옆까지
+    seg(R.x0, R.z0, HOUSE_POS.x - 1.5, R.z0); seg(HOUSE_POS.x + 1.5, R.z0, R.x1, R.z0);
     const grass = mesh(new THREE.CylinderGeometry(1, 1, 0.03, 24), 0xa8e08a); grass.scale.set((R.x1 - R.x0) / 2, 1, (R.z1 - R.z0) / 2); grass.position.set((R.x0 + R.x1) / 2, 0.03, (R.z0 + R.z1) / 2); grass.userData.noOutline = true; g.add(grass);
     const sign = makeLabel('🏡 마당', '#5a7a3a', 'rgba(255,255,255,0.9)'); sign.position.set(gx + gate + 0.6, 1.4, R.z1); sign.scale.multiplyScalar(0.7); g.add(sign);
     outline(g, 0.02, 0x4a3048, 0.05);
@@ -468,10 +495,10 @@ export class World {
     const h = World.prototype.makeHouse.call(tmp, colorId, name);
     h.position.set(pos[0], 0, pos[1]);
     this.group.add(h);
-    const box = { x0: pos[0] - 2.7, x1: pos[0] + 2.7, z0: pos[1] - 2.4, z1: pos[1] + 2.35, friend: slot };
+    const box = { x0: pos[0] - HB.x, x1: pos[0] + HB.x, z0: pos[1] - HB.zb, z1: pos[1] + HB.zf, friend: slot };
     this.boxes.push(box);
     if (this.lots[slot]) this.lots[slot].visible = false;
-    this.friendHouses[slot] = { mesh: h, box, winMat: tmp.windowMat, label: tmp.houseLabel, door: new THREE.Vector3(pos[0], 0, pos[1] + 3.2) };
+    this.friendHouses[slot] = { mesh: h, box, winMat: tmp.windowMat, label: tmp.houseLabel, door: new THREE.Vector3(pos[0], 0, pos[1] + HB.door) };
     return this.friendHouses[slot];
   }
   removeFriendHouse(slot) {

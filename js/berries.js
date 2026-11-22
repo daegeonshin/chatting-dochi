@@ -9,7 +9,7 @@ export const berryHex = c => (MAGPIE_COLORS[c] || MAGPIE_COLORS.red).hex;
 export const BERRY_NAMES = { green: '초록', blue: '파랑', white: '하양', yellow: '노랑', pink: '핑크', purple: '보라', red: '빨강' };
 
 // 마을 둘레의 열매 나무 3그루 (친구 집터, 길과 겹치지 않는 자리)
-const SPOTS = [[1.35, 19], [0.25, 20], [1.05, 19]];
+const SPOTS = [[0.6, 19], [0.25, 20], [0.75, 21]]; // 광장 남쪽 (집 자리와 안 겹치게)
 
 export function makeBerryMesh(color) {
   const g = new THREE.Group();
