@@ -1,4 +1,5 @@
-const KEY = 'forestFriends.v1';
+// ?ffp=이름 : 한 브라우저에서 여러 사람을 시험할 때 저장을 따로 씀 (개발용)
+const KEY = 'forestFriends.v1' + ((new URLSearchParams(location.search).get('ffp') || '').replace(/[^a-z0-9]/gi, '').slice(0, 8));
 
 export function defaultSave() {
   return {
@@ -34,3 +35,5 @@ export function save(state) {
   clearTimeout(timer);
   timer = setTimeout(() => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { /* 저장 공간 부족 */ } }, 200);
 }
+// 바로 저장 (방 들어가기처럼 곧바로 새로고침할 때)
+export function saveNow(state) { clearTimeout(timer); try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { /* 저장 공간 부족 */ } }

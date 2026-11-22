@@ -2,7 +2,12 @@ import * as THREE from 'three';
 import { HAIR_STYLES, HAIR_COLORS, EYE_COLORS, COLORS7, PETS, VEHICLES, FURNITURE, FURN_COLORS } from './data.js';
 import { load, save } from './save.js';
 import { Avatar } from './avatar.js';
-import { World, height, HOUSE_POS } from './world.js';
+import { World, height, HOUSE_POS, setHouseSlot } from './world.js';
+import { Net, normCode, validCode, MAX_SLOTS } from './net.js';
+import { Friends, packMe } from './friends.js';
+import { cleanChat } from './chatfilter.js';
+import { saveNow } from './save.js';
+import { makeLabel } from './utils.js';
 import { Player } from './player.js';
 import { Input, onPress } from './input.js';
 import { DayNight } from './daynight.js';
@@ -23,6 +28,7 @@ import { toon, outline, makeSkyDome, GFX, setGfx } from './look.js';
 import { $, toast, openPanel, closePanel, prompt, transition, el, hexCss } from './ui.js';
 
 const S = load();
+if (S.room) setHouseSlot(S.room.slot); // 친구 방에서는 내 집이 방에서 맡은 자리에 있음
 const persist = () => { if (G.dn) S.clock = G.dn.serialize(); save(S); };
 
 // 렌더러
@@ -166,6 +172,7 @@ function startGame() {
   }, 600);
   setInterval(persist, 5000);
   setInterval(sparrowVisit, 60000);
+  initNet();
   addEventListener('visibilitychange', () => { if (document.hidden) persist(); });
 }
 
@@ -452,10 +459,213 @@ onPress($('btn-context'), () => {
 });
 
 // 채팅 (4단계에서 친구 서버와 연결)
-onPress($('btn-chat'), () => openPanel('💬 친구들 단톡방', body => {
-  body.appendChild(el('div', 'p-info', '친구들이 숲에 들어오면 여기서 다 같이 이야기할 수 있어요.<br>초대 코드를 아는 친구만 들어올 수 있고, 나쁜 말은 자동으로 가려져요.'));
-  body.appendChild(el('div', 'p-info', '🚧 친구 기능은 곧 열려요!'));
-}));
+// ───────── 친구 (같은 방, 단톡방) ─────────
+G.chat = []; G.unread = 0;
+const txt = (tag, cls, text) => { const e = el(tag, cls); e.textContent = text; return e; }; // 친구가 쓴 글은 꼭 textContent로
+const isChatOpen = () => !$('panel').classList.contains('hidden') && $('panel-title').textContent.startsWith('💬');
+function setUnread(n) {
+  G.unread = n;
+  const b = $('btn-chat');
+  b.dataset.badge = n > 0 ? (n > 9 ? '9+' : String(n)) : '';
+  b.classList.toggle('badge', n > 0);
+}
+async function initNet() {
+  G.net = new Net(S, {
+    onMembers: m => { if (G.friends) G.friends.setMembers(m); if (isChatOpen()) chatPanel(true); },
+    onPos: pos => { if (G.friends) G.friends.setPos(pos); },
+    onChat: msg => addChat(msg),
+    onKicked: msg => backToSolo(msg),
+  });
+  if (!G.net.enabled) return;
+  const link = normCode(new URLSearchParams(location.search).get('room'));
+  if (S.room) {
+    if (!await G.net.connect()) { toast('친구 서버에 연결하지 못했어요. 혼자 놀 수 있어요', 3500); return; }
+    G.friends = new Friends(G.forest, G.world, G.net.uid);
+    G.chatHistory = true;
+    if (await G.net.enter()) {
+      setTimeout(() => { G.chatHistory = false; }, 2500);
+      setTimeout(() => {
+        const n = G.friends.online().length;
+        toast(n ? `친구 ${n}명이 숲에 있어요 👋` : `친구 방(${S.room.code})에 들어왔어요`, 3000);
+      }, 4200);
+    }
+  }
+  if (validCode(link) && (!S.room || S.room.code !== link)) setTimeout(() => joinPanel(link), 1500);
+}
+// 방에 들어가거나 나오면 집 자리가 바뀌므로 새로 시작
+const urlNoRoom = () => { const u = new URL(location.href); u.searchParams.delete('room'); return u.pathname + u.search; };
+function restart(msg) {
+  saveNow(S);
+  transition(() => location.replace(urlNoRoom()), msg, 3000);
+}
+function backToSolo(msg) {
+  if (!S.room) return;
+  if (G.net) G.net.stop();
+  S.room = null; S.clock = G.dn.serialize();
+  toast(msg, 3000);
+  setTimeout(() => restart('혼자 놀기로 돌아가요 🏡'), 1500);
+}
+function addChat(msg) {
+  G.chat.push(msg);
+  if (G.chat.length > 40) G.chat.shift();
+  if (G.chatHistory) { if (isChatOpen()) appendChat(msg); return; }
+  if (msg.uid !== G.net.uid) {
+    if (G.friends) G.friends.say(msg.uid, msg.text);
+    if (isChatOpen()) appendChat(msg); else { setUnread(G.unread + 1); sfx.click(); }
+  } else {
+    if (G.myBubble) G.player.root.remove(G.myBubble);
+    G.myBubble = makeLabel('💬 ' + msg.text, '#5a4050', 'rgba(255,255,255,0.95)');
+    G.myBubble.position.y = 2.75; G.myBubble.scale.multiplyScalar(0.8);
+    G.player.root.add(G.myBubble); G.myBubbleT = 6;
+    if (isChatOpen()) appendChat(msg);
+  }
+}
+function chatLine(c) {
+  const mine = c.uid === G.net.uid;
+  const line = el('div', 'chat-line' + (mine ? ' mine' : ''));
+  if (!mine) line.appendChild(txt('div', 'chat-name', c.name));
+  line.appendChild(txt('div', 'chat-msg', c.text));
+  return line;
+}
+// 단톡방이 열려 있으면 한 줄만 붙임 (입력 중인 글자와 키보드 유지)
+function appendChat(c) {
+  const log = $('chat-log');
+  if (!log) return chatPanel(true);
+  const empty = log.querySelector('.chat-empty'); if (empty) empty.remove();
+  log.appendChild(chatLine(c));
+  while (log.children.length > 40) log.firstChild.remove();
+  log.scrollTop = log.scrollHeight;
+}
+function inviteLink() { return location.origin + location.pathname + '?room=' + S.room.code; }
+async function shareInvite() {
+  const url = inviteLink();
+  const text = `채팅도치에서 같이 놀자! 초대 코드 ${S.room.code}`;
+  try { if (navigator.share) { await navigator.share({ title: '채팅도치', text, url }); return; } } catch { return; }
+  try { await navigator.clipboard.writeText(text + ' ' + url); toast('초대 링크를 복사했어요. 친구에게 보내 주세요 📋', 3000); }
+  catch { toast(`초대 코드 : ${S.room.code}`, 5000); }
+}
+function joinPanel(code) {
+  openPanel('💬 친구 방 초대', body => {
+    body.appendChild(txt('div', 'p-info', `초대 코드 ${code} 방에 들어갈까요?`));
+    if (S.room) body.appendChild(txt('div', 'p-info', `지금 있는 방(${S.room.code})에서는 나오게 돼요.`));
+    body.appendChild(el('div', 'p-info', '친구 방에 들어가면 내 집이 친구 마을로 이사 가요.<br>반려동물과 가구는 그대로예요.'));
+    const row = el('div', 'center');
+    const ok = el('button', 'p-btn green', '들어가기');
+    ok.onclick = () => doJoin(code, ok);
+    const no = el('button', 'p-btn gray', '다음에');
+    no.onclick = () => { closePanel(); history.replaceState(null, '', urlNoRoom()); };
+    row.append(ok, no); body.appendChild(row);
+  });
+}
+async function doJoin(code, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '들어가는 중...'; }
+  try {
+    const r = await G.net.joinRoom(code);
+    if (S.room && S.room.code !== r.code) await G.net.leave();
+    S.room = r; S.clock = G.dn.serialize();
+    closePanel();
+    restart('친구 마을로 이사 가요 🚚');
+  } catch (e) {
+    toast(e.message || '들어가지 못했어요', 3500);
+    if (btn) { btn.disabled = false; btn.textContent = '들어가기'; }
+  }
+}
+async function doCreate(btn) {
+  btn.disabled = true; btn.textContent = '만드는 중...';
+  try {
+    S.room = await G.net.createRoom(); S.clock = G.dn.serialize();
+    closePanel();
+    restart('새 방을 만들었어요 🏡');
+  } catch (e) { toast(e.message || '방을 만들지 못했어요', 3500); btn.disabled = false; btn.textContent = '🏡 새 방 만들기'; }
+}
+function chatPanel(refresh = false) {
+  const keepText = refresh && $('chat-in') ? $('chat-in').value : '';
+  const hadFocus = refresh && document.activeElement && document.activeElement.id === 'chat-in';
+  const build = body => {
+    if (!G.net || !G.net.enabled) {
+      body.appendChild(el('div', 'p-info', '친구들이 숲에 들어오면 여기서 다 같이 이야기할 수 있어요.<br>초대 코드를 아는 친구만 들어올 수 있고, 나쁜 말은 자동으로 가려져요.'));
+      body.appendChild(el('div', 'p-info', '🚧 친구 기능은 어른이 서버를 연결하면 열려요!'));
+      return;
+    }
+    if (!S.room) {
+      body.appendChild(el('div', 'p-info', `방을 만들고 초대 코드를 친구에게 알려 주세요. 최대 ${MAX_SLOTS}명이 같은 숲에서 놀 수 있어요.<br>이름(닉네임)만 보이고, 나쁜 말과 전화번호는 자동으로 가려져요.`));
+      const row = el('div', 'center');
+      const mk = el('button', 'p-btn green', '🏡 새 방 만들기'); mk.onclick = () => doCreate(mk);
+      const jn = el('button', 'p-btn', '🔑 초대 코드로 들어가기');
+      jn.onclick = async () => {
+        const c = normCode(await prompt('친구에게 받은 초대 코드 6글자', ''));
+        if (!c) return;
+        if (!validCode(c)) { toast('초대 코드는 6글자예요'); return; }
+        doJoin(c);
+      };
+      row.append(mk, jn); body.appendChild(row);
+      return;
+    }
+    // 방 안
+    const head = el('div', 'chat-head');
+    head.appendChild(txt('span', 'chat-code', `초대 코드 ${S.room.code}`));
+    const sh = el('button', 'p-btn small', '📨 친구 부르기'); sh.onclick = shareInvite; head.appendChild(sh);
+    body.appendChild(head);
+    const mem = el('div', 'chat-members');
+    const owner = G.net.meta && G.net.meta.owner;
+    const on = new Set(G.friends ? G.friends.online().map(f => f.uid) : []);
+    const entries = Object.entries(G.net.members).sort((a, b) => a[1].slot - b[1].slot);
+    for (const [uid, m] of entries) {
+      const me = uid === G.net.uid;
+      const chip = el('span', 'mem' + (me || on.has(uid) ? ' on' : ''));
+      chip.appendChild(txt('span', '', (me || on.has(uid) ? '🟢 ' : '⚪ ') + (me ? S.profile.name : cleanChat(m.name).slice(0, 8) || '친구') + (uid === owner ? ' 👑' : '') + (me ? ' (나)' : '')));
+      if (G.net.isOwner && !me) {
+        const k = el('button', 'kick', '내보내기');
+        k.onclick = async () => { k.disabled = true; try { await G.net.kick(uid); toast('방에서 내보냈어요'); } catch { toast('내보내지 못했어요'); } };
+        chip.appendChild(k);
+      }
+      mem.appendChild(chip);
+    }
+    body.appendChild(mem);
+    const log = el('div', 'chat-log'); log.id = 'chat-log';
+    if (!G.chat.length) log.appendChild(txt('div', 'chat-empty', '아직 이야기가 없어요. 먼저 인사해 볼까요? 👋'));
+    for (const c of G.chat) log.appendChild(chatLine(c));
+    body.appendChild(log);
+    const form = el('div', 'chat-form');
+    const inp = el('input'); inp.id = 'chat-in'; inp.maxLength = 40; inp.placeholder = '하고 싶은 말'; inp.autocomplete = 'off'; inp.value = keepText;
+    const send = el('button', 'p-btn green', '보내기');
+    const doSend = async () => {
+      const v = inp.value.trim(); if (!v) return;
+      if (performance.now() - (G.lastSay || 0) < 1200) { toast('조금 천천히 보내요 🙂'); return; }
+      G.lastSay = performance.now();
+      inp.value = '';
+      try { await G.net.say(v); } catch { toast('보내지 못했어요. 인터넷을 확인해 주세요'); inp.value = v; }
+    };
+    send.onclick = doSend;
+    inp.onkeydown = e => { if (e.key === 'Enter' && !e.isComposing) doSend(); };
+    form.append(inp, send); body.appendChild(form);
+    const quick = el('div', 'chat-quick');
+    for (const q of ['안녕 👋', '같이 놀자!', '어디야?', '우리 집 와!', '잘 자 🌙', '고마워 💖']) {
+      const b = txt('button', 'chip', q);
+      b.onclick = () => { inp.value = q; doSend(); };
+      quick.appendChild(b);
+    }
+    body.appendChild(quick);
+    const foot = el('div', 'center');
+    if (G.net.isOwner) {
+      const locked = !!(G.net.meta && G.net.meta.locked);
+      const lk = el('button', 'p-btn gray small', locked ? '🔓 새 친구 받기' : '🔒 방 잠그기 (새 친구 못 들어옴)');
+      lk.onclick = async () => { await G.net.setLocked(!locked); chatPanel(true); };
+      foot.appendChild(lk);
+    }
+    const lv = el('button', 'p-btn gray small', '🚪 방 나가기');
+    lv.onclick = () => {
+      if (lv.dataset.sure) { lv.disabled = true; G.net.leave().then(() => { S.room = null; S.clock = G.dn.serialize(); restart('혼자 놀기로 돌아가요 🏡'); }); return; }
+      lv.dataset.sure = '1'; lv.textContent = '정말 나갈까요? 한 번 더 누르면 나가요';
+    };
+    foot.appendChild(lv);
+    body.appendChild(foot);
+    setTimeout(() => { log.scrollTop = log.scrollHeight; if (hadFocus) inp.focus(); }, 0);
+  };
+  if (refresh) { const body = $('panel-body'); body.innerHTML = ''; build(body); }
+  else { setUnread(0); openPanel('💬 친구들 단톡방', build); }
+}
+onPress($('btn-chat'), () => chatPanel());
 
 // 반려동물 (종류마다 한 마리씩)
 onPress($('btn-pet'), () => petListPanel());
@@ -893,6 +1103,7 @@ function frame() {
     G.world.update(dt, G.t, night);
     G.berries.update(dt, G.t);
     G.wild.update(dt, p);
+    if (G.friends) G.friends.update(dt, night);
     updateCarry();
     G.floatF.update(dt);
 
@@ -950,6 +1161,9 @@ function frame() {
     setContext('exit');
     renderer.render(G.house.scene, camera);
   }
+
+  if (G.net && S.room && G.friends) G.net.sendPos(packMe(G, walkers()));
+  if (G.myBubbleT > 0 && (G.myBubbleT -= dt) <= 0) { G.player.root.remove(G.myBubble); G.myBubble = null; }
 
   clockTick -= dt;
   if (clockTick <= 0) {
@@ -1034,4 +1248,4 @@ frame();
 if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('sw.js').catch(() => {});
 
 // 테스트용 핸들 (개발자 도구에서 사용)
-window.__T = { waterSapling, startMini, camera, input, G, S, startWalk, endWalk, enterHouse, exitHouse, sleep, createPet, persist, pickUp, dropCarry, applyWindowState, sparrowVisit };
+window.__T = { chatPanel, addChat, waterSapling, startMini, camera, input, G, S, startWalk, endWalk, enterHouse, exitHouse, sleep, createPet, persist, pickUp, dropCarry, applyWindowState, sparrowVisit };

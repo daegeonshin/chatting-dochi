@@ -9,6 +9,9 @@ export const MEADOW = { x: 58, z: -32, r: 28 };
 export const POND = { x: -52, z: 30, r: 13 };
 export const WATER_Y = -0.35;
 export const HOUSE_POS = { x: 0, z: -13 }; // 내 집 (광장 쪽을 바라봄)
+// 친구 방의 집 자리 (0번은 방장). 모두 +z(광장 쪽)를 바라보고, 길과 겹치지 않는 평평한 곳
+export const SLOTS = [[0, -13], [-9, -11], [9, -11], [-18, -12], [-17, 4]];
+export function setHouseSlot(n) { const p = SLOTS[n] || SLOTS[0]; HOUSE_POS.x = p[0]; HOUSE_POS.z = p[1]; }
 const ZONES = [VILLAGE, MEADOW, POND];
 
 const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
@@ -338,12 +341,10 @@ export class World {
     this.boxes.push({ x0: HOUSE_POS.x - 2.7, x1: HOUSE_POS.x + 2.7, z0: HOUSE_POS.z - 2.4, z1: HOUSE_POS.z + 2.35 });
     this.door = new THREE.Vector3(HOUSE_POS.x, 0, HOUSE_POS.z + 3.2);
 
-    // 친구 집터 (4단계에서 친구 집이 들어올 자리)
-    this.lots = [];
-    const lotAngles = [Math.PI * 0.12, Math.PI * 0.38, Math.PI * 0.62, Math.PI * 0.88, Math.PI * 1.75];
-    for (const a of lotAngles) {
-      const x = Math.cos(a) * 15.5, z = Math.sin(a) * 15.5;
-      if (pathDist(x, z) < 4.5) continue;
+    // 친구 집터 : 방의 집 자리(SLOTS) 중 내 자리를 뺀 곳. 친구가 들어오면 그 자리에 친구 집이 생김
+    this.lots = {}; this.friendHouses = {}; this.friendWinMats = [];
+    SLOTS.forEach(([x, z], n) => {
+      if (x === HOUSE_POS.x && z === HOUSE_POS.z) return;
       const lot = new THREE.Group();
       const base = mesh(new THREE.CylinderGeometry(2.6, 2.6, 0.08, 20), 0xd9ecb0); base.position.y = 0.04;
       lot.add(base);
@@ -356,8 +357,8 @@ export class World {
       const label = makeLabel('친구 집 자리', '#7a5a3a', 'rgba(255,248,230,0.95)'); label.position.y = 1.25; label.scale.multiplyScalar(0.8); lot.add(label);
       lot.position.set(x, 0, z);
       this.group.add(lot);
-      this.lots.push({ x, z, a });
-    }
+      this.lots[n] = lot;
+    });
   }
 
   makeHouse(colorId, name) {
@@ -412,6 +413,27 @@ export class World {
   setWindows(state) { this.winState = state; applyWindows(this.myHouse, state); }
 
   // 집 색이나 이름이 바뀌면 다시 짓기
+  // 친구 집 짓기와 허물기 (slot : 집 자리 번호)
+  setFriendHouse(slot, colorId, name) {
+    this.removeFriendHouse(slot);
+    const pos = SLOTS[slot]; if (!pos) return null;
+    const tmp = { windowMat: null, houseLabel: null, winState: null };
+    const h = World.prototype.makeHouse.call(tmp, colorId, name);
+    h.position.set(pos[0], 0, pos[1]);
+    this.group.add(h);
+    const box = { x0: pos[0] - 2.7, x1: pos[0] + 2.7, z0: pos[1] - 2.4, z1: pos[1] + 2.35, friend: slot };
+    this.boxes.push(box);
+    if (this.lots[slot]) this.lots[slot].visible = false;
+    this.friendHouses[slot] = { mesh: h, box, winMat: tmp.windowMat, label: tmp.houseLabel, door: new THREE.Vector3(pos[0], 0, pos[1] + 3.2) };
+    return this.friendHouses[slot];
+  }
+  removeFriendHouse(slot) {
+    const f = this.friendHouses[slot]; if (!f) return;
+    this.group.remove(f.mesh);
+    this.boxes.splice(this.boxes.indexOf(f.box), 1);
+    if (this.lots[slot]) this.lots[slot].visible = true;
+    delete this.friendHouses[slot];
+  }
   rebuildHouse(profile) {
     this.group.remove(this.myHouse);
     this.myHouse = this.makeHouse(profile.houseColor, profile.houseName);

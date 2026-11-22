@@ -1,0 +1,76 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "rooms": {
+      "$code": {
+        ".validate": "$code.matches(/^[A-HJ-NP-Z2-9]{6}$/)",
+        "meta": {
+          ".read": "auth != null",
+          ".write": "auth != null && newData.exists() && ((!data.exists() && newData.child('owner').val() === auth.uid) || data.child('owner').val() === auth.uid)",
+          ".validate": "newData.hasChildren(['owner', 'createdAt', 'locked'])",
+          "owner": { ".validate": "newData.isString() && (!data.exists() || newData.val() === data.val())" },
+          "createdAt": { ".validate": "newData.isNumber() && (data.exists() ? newData.val() === data.val() : newData.val() === now)" },
+          "locked": { ".validate": "newData.isBoolean()" },
+          "$other": { ".validate": false }
+        },
+        "slots": {
+          ".read": "auth != null",
+          "$n": {
+            ".write": "auth != null && ((!data.exists() && newData.val() === auth.uid && newData.parent().parent().child('meta').exists()) || (data.val() === auth.uid && !newData.exists()) || (!newData.exists() && root.child('rooms').child($code).child('meta/owner').val() === auth.uid))",
+            ".validate": "$n.matches(/^[0-4]$/) && newData.isString()"
+          }
+        },
+        "members": {
+          ".read": "auth != null && data.child(auth.uid).exists()",
+          "$uid": {
+            ".read": "auth != null && auth.uid === $uid",
+            ".write": "auth != null && ((auth.uid === $uid && newData.exists() && newData.parent().parent().child('meta').exists() && !root.child('rooms').child($code).child('kicked').child($uid).exists() && (data.exists() || newData.parent().parent().child('meta/locked').val() !== true)) || (!newData.exists() && (auth.uid === $uid || root.child('rooms').child($code).child('meta/owner').val() === auth.uid)))",
+            ".validate": "newData.hasChildren(['name', 'house', 'look', 'slot', 'joinedAt']) && newData.parent().parent().child('slots').child(newData.child('slot').val() + '').val() === $uid",
+            "name": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 8" },
+            "house": { ".validate": "newData.isString() && newData.val().length <= 10" },
+            "slot": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 4 && (!data.exists() || newData.val() === data.val())" },
+            "joinedAt": { ".validate": "newData.isNumber()" },
+            "look": {
+              "$k": { ".validate": "$k.matches(/^(hair|hairColor|eye|cloth|houseColor)$/) && newData.isString() && newData.val().length <= 12" }
+            },
+            "$other": { ".validate": false }
+          }
+        },
+        "kicked": {
+          "$uid": {
+            ".read": "auth != null && auth.uid === $uid",
+            ".write": "auth != null && root.child('rooms').child($code).child('meta/owner').val() === auth.uid",
+            ".validate": "newData.isBoolean()"
+          }
+        },
+        "pos": {
+          ".read": "auth != null && root.child('rooms').child($code).child('members').child(auth.uid).exists()",
+          "$uid": {
+            ".write": "auth != null && ((auth.uid === $uid && (!newData.exists() || root.child('rooms').child($code).child('members').child($uid).exists())) || (!newData.exists() && root.child('rooms').child($code).child('meta/owner').val() === auth.uid))",
+            ".validate": "newData.hasChildren(['m', 'x', 'y', 'z', 't'])",
+            "m": { ".validate": "newData.val() === 'forest' || newData.val() === 'house'" },
+            "x": { ".validate": "newData.isNumber() && newData.val() > -500 && newData.val() < 500" },
+            "y": { ".validate": "newData.isNumber() && newData.val() > -500 && newData.val() < 500" },
+            "z": { ".validate": "newData.isNumber() && newData.val() > -500 && newData.val() < 500" },
+            "a": { ".validate": "newData.isNumber() && newData.val() > -500 && newData.val() < 500" },
+            "r": { ".validate": "newData.isString() && newData.val().length <= 8" },
+            "s": { ".validate": "newData.isNumber()" },
+            "pt": { ".validate": "newData.isString() && newData.val().length <= 200" },
+            "t": { ".validate": "newData.val() === now" },
+            "$other": { ".validate": false }
+          }
+        },
+        "chat": {
+          ".read": "auth != null && root.child('rooms').child($code).child('members').child(auth.uid).exists()",
+          "$id": {
+            ".write": "auth != null && !data.exists() && newData.exists() && root.child('rooms').child($code).child('members').child(auth.uid).exists()",
+            ".validate": "newData.hasChildren(['u', 'n', 'm', 't']) && newData.child('u').val() === auth.uid && newData.child('n').isString() && newData.child('n').val().length <= 8 && newData.child('m').isString() && newData.child('m').val().length >= 1 && newData.child('m').val().length <= 60 && newData.child('t').val() === now",
+            "$other": { ".validate": "$other.matches(/^(u|n|m|t)$/)" }
+          }
+        },
+        "$other": { ".validate": false }
+      }
+    }
+  }
+}
