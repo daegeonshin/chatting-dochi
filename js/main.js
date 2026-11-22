@@ -51,7 +51,7 @@ function resize() {
 addEventListener('resize', resize);
 
 const input = new Input(canvas);
-const G = { mode: 'customize', camYaw: Math.PI, camPitch: 0.42, houseYaw: 0, t: 0, deco: false, drag: null, pet: null, petWalking: false, built: false };
+const G = { mode: 'customize', camYaw: Math.PI, camPitch: 0.42, houseYaw: 0, housePitch: 0.5, t: 0, deco: false, drag: null, pet: null, petWalking: false, built: false };
 
 // ───────── 캐릭터 꾸미기 ─────────
 const draft = S.profile ? { ...S.profile } : { name: '', houseName: '', houseColor: 'sky', hair: 'twin', hairColor: 'brown', eye: 'darkbrown', cloth: 'lilac' };
@@ -1146,7 +1146,9 @@ function frame() {
     setContext(nearDoor ? 'enter' : null);
     renderer.render(G.forest, camera);
   } else {
-    G.houseYaw = clamp(G.houseYaw - look.dx * 0.004, -0.7, 0.7);
+    // 집 안 시점 : 좌우로 끌면 돌아보고, 위아래로 끌면 높이 (위로 올리면 집 전체가 보임)
+    G.houseYaw -= look.dx * 0.006;
+    G.housePitch = clamp(G.housePitch + look.dy * 0.004, 0.12, 1.25);
     if (!G.sleeping) p.update(dt, mv, G.houseYaw, G.house.env);
     else p.avatar.update(dt, 0, false);
     if (!G.sleeping) pushFromAnimals(G.house.scene, G.birds.groundCircles());
@@ -1154,10 +1156,19 @@ function frame() {
     updateCarry();
     G.floatH.update(dt);
     // 넓은 집 : 카메라가 나를 따라다니고, 가리는 벽은 흐려짐
-    const goalT = new THREE.Vector3(p.pos.x, 0.9, p.pos.z - 0.6);
-    if (G.houseCamReset) { camTarget.copy(goalT); G.houseCamReset = false; } else camTarget.lerp(goalT, 1 - Math.pow(0.001, dt));
-    const dist = G.deco ? 13 : 10.5, pitch = G.deco ? 0.95 : 0.82;
-    camera.position.set(camTarget.x + Math.sin(G.houseYaw) * Math.cos(pitch) * dist, camTarget.y + Math.sin(pitch) * dist, camTarget.z + Math.cos(G.houseYaw) * Math.cos(pitch) * dist);
+    const goalT = new THREE.Vector3(p.pos.x, 1.2, p.pos.z);
+    if (G.houseCamReset) { camTarget.copy(goalT); G.houseCamReset = false; } else camTarget.lerp(goalT, 1 - Math.pow(0.0001, dt));
+    // 꾸미기 중에는 위에서 넓게, 평소에는 숲처럼 뒤에서 (높이에 따라 거리도 늘어남)
+    const pitch = G.deco ? Math.max(G.housePitch, 0.95) : G.housePitch;
+    let dist = G.deco ? 12 : 5.2 + pitch * 5;
+    const dir = new THREE.Vector3(Math.sin(G.houseYaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(G.houseYaw) * Math.cos(pitch));
+    // 바깥벽 밖으로 나가지 않게 (앞쪽은 열려 있어 조금 여유)
+    for (let k = 0; k < 12; k++) {
+      const cx = camTarget.x + dir.x * dist, cz = camTarget.z + dir.z * dist;
+      if (Math.abs(cx) < ROOM.w / 2 - 0.3 && cz > -ROOM.d / 2 + 0.3 && cz < ROOM.d / 2 + 3) break;
+      dist *= 0.85;
+    }
+    camera.position.copy(camTarget).addScaledVector(dir, Math.max(dist, 1.6));
     camera.lookAt(camTarget);
     G.house.fadeWalls(camera.position, p.pos, dt);
     // 문 매트에 서면 나가기
