@@ -23,7 +23,8 @@ function makeFish(color) {
   g.userData.tail = tail;
   return g;
 }
-function makeDuck(baby) {
+const HIT_MAT = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
+export function makeDuck(baby) {
   const g = new THREE.Group();
   const bodyC = baby ? 0xffe14d : 0xfaf8f0;
   const body = mesh(S(0.3, 14, 10), bodyC); body.scale.set(0.85, 0.7, 1.15); body.position.y = 0.28; g.add(body);
@@ -40,6 +41,8 @@ function makeDuck(baby) {
   });
   g.userData.legs = legs; g.userData.head = head; g.userData.wings = wings;
   outline(g, 0.014, 0x4a3048, 0.05);
+  // 누르기 쉽게 보이지 않는 큰 공 (작은 오리도 톡 누르기 쉽게)
+  const hitBall = new THREE.Mesh(new THREE.SphereGeometry(0.6, 8, 6), HIT_MAT); hitBall.position.y = 0.35; hitBall.userData.noOutline = true; g.add(hitBall);
   if (baby) g.scale.setScalar(0.5);
   return g;
 }
@@ -480,7 +483,31 @@ export class Wildlife {
     for (const s of this.sparrows) if (s.state === 'peck') out.push(s.m);
     for (const mp of this.magpies) if (mp.m.visible && mp.state === 'perch') out.push(mp.m);
     for (const n of this.nests) out.push(...n.eggs);
+    for (const f of this.families) if (f.state === 'swim') for (const d of f.ducks) out.push(d.m);
     return out;
+  }
+  isDuck(m) { return this.families.some(f => f.ducks.some(d => d.m === m)); }
+  // 오리 안기 : 엄마든 아기든 누르면 가족 전체 (엄마는 품에, 아기들은 뒤따라옴)
+  takeDuck(m) {
+    const fi = this.families.findIndex(f => f.state === 'swim' && f.ducks.some(d => d.m === m));
+    if (fi < 0) return null;
+    const fam = this.families[fi];
+    this.families.splice(fi, 1);
+    fam.ducks.forEach(d => this.group.remove(d.m));
+    return { mom: fam.ducks[0].m, babies: fam.ducks.slice(1).map(d => d.m) };
+  }
+  // 숲 연못에 오리 가족 풀어 주기
+  releaseDucks(mom, babies, at) {
+    const ox = at.x - POND.x, oz = at.z - POND.z, od = Math.hypot(ox, oz) || 1, r = POND.r - 2;
+    const sx = POND.x + ox / od * r, sz = POND.z + oz / od * r;
+    const fam = { ducks: [], state: 'swim', life: 0, maxLife: rand(600, 900), fleeCool: 3, target: null };
+    [mom, ...babies].forEach((m, i) => {
+      m.scale.setScalar(i ? 0.5 : 1); m.position.set(sx - ox / od * i * 0.5, WATER_Y, sz - oz / od * i * 0.5);
+      this.group.add(m);
+      fam.ducks.push({ m, baby: i > 0, yaw: Math.atan2(-ox, -oz), from: m.position.clone(), to: m.position.clone(), k: 1, dur: 1, landed: true });
+    });
+    this.families.push(fam);
+    sfx.splash();
   }
   groundCircles() {
     const out = [];
@@ -501,6 +528,7 @@ export class Wildlife {
       const mp = this.magpies[mi];
       if (mp.partner) { mp.partner.partner = null; mp.partner.leader = false; }
       this.group.remove(m); this.magpies.splice(mi, 1);
+      if (mp.mine) return { kind: 'magpie', color: mp.color, mine: mp.mine, name: mp.name };
       setTimeout(() => this.addMagpie(), 60000); // 숲의 까치 수 유지
       return { kind: 'magpie', color: mp.color };
     }
@@ -521,12 +549,13 @@ export class Wildlife {
     const nm = makeMagpie(color);
     nm.position.copy(m.position); nm.rotation.copy(m.rotation);
     this.group.remove(m); this.group.add(nm);
+    if (mp.label) nm.add(mp.label);
     mp.m = nm; mp.color = color;
     return true;
   }
   // 밖에서 내려놓은 새는 날아감
   release(kind, color, pos) {
-    if (kind === 'magpie') { this.addMagpie(color, pos); return; }
+    if (kind === 'magpie') return this.addMagpie(color, pos);
     const m = makeSparrow(); this.group.add(m); m.position.copy(pos);
     const s = { m, flock: ++this.flockId, state: 'fly', yaw: 0, vel: new THREE.Vector3(), life: 0, flyT: 0 };
     this.sparrows.push(s); this.flyAway(s, pos.x - 1, pos.z - 1);

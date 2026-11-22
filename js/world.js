@@ -413,6 +413,53 @@ export class World {
   setWindows(state) { this.winState = state; applyWindows(this.myHouse, state); }
 
   // 집 색이나 이름이 바뀌면 다시 짓기
+  // 내 집 뒤 비닐하우스 (밖에서 보이는 모습). 안은 house.js의 비닐하우스 방
+  setGreenhouse(on) {
+    if (this.greenhouse) { this.group.remove(this.greenhouse); this.boxes.splice(this.boxes.indexOf(this.greenhouseBox), 1); this.greenhouse = null; }
+    if (!on) return;
+    const g = new THREE.Group(), W = 3.6, D = 2.8, H = 2.3;
+    const cx = HOUSE_POS.x + 1.0, cz = HOUSE_POS.z - 2.2 - D / 2 - 0.05;
+    const glass = new THREE.MeshBasicMaterial({ color: 0xeafff0, transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(W, H * 0.6, D), glass); body.position.y = H * 0.3; g.add(body);
+    const roof = new THREE.Mesh(new THREE.CylinderGeometry(W / 2, W / 2, D, 18, 1, true, -Math.PI / 2, Math.PI), glass); roof.rotation.x = Math.PI / 2; roof.scale.set(1, 1, 0.55); roof.position.y = H * 0.6; g.add(roof);
+    for (let k = 0; k <= 3; k++) {
+      const z = -D / 2 + D * k / 3;
+      const arc = mesh(new THREE.TorusGeometry(W / 2, 0.04, 5, 18, Math.PI), 0xffffff); arc.position.set(0, H * 0.6, z); arc.scale.y = 0.55; g.add(arc);
+      for (const sx of [-1, 1]) { const p = mesh(new THREE.BoxGeometry(0.08, H * 0.6, 0.08), 0xffffff); p.position.set(sx * W / 2, H * 0.3, z); g.add(p); }
+    }
+    for (let k = 0; k < 6; k++) { const pl = mesh(new THREE.SphereGeometry(0.3, 8, 6), [0x6cc35f, 0x8fdc8f, 0xff9ec3][k % 3]); pl.position.set(-1.1 + (k % 3) * 1.1, 0.3, -0.8 + Math.floor(k / 3) * 1.6); g.add(pl); }
+    // 창문 (g) : 열리면 까치가 드나드는 곳
+    const win = mesh(new THREE.BoxGeometry(0.9, 0.7, 0.06), 0xffffff); win.position.set(0.6, 1.0, -D / 2 - 0.02); g.add(win);
+    g.position.set(cx, 0, cz);
+    this.group.add(g); this.greenhouse = g;
+    this.greenhouseBox = { x0: cx - W / 2 - 0.1, x1: cx + W / 2 + 0.1, z0: cz - D / 2 - 0.1, z1: cz + D / 2 };
+    this.boxes.push(this.greenhouseBox);
+    this.greenWin = new THREE.Vector3(cx + 0.6, 1.0, cz - D / 2 - 0.4);
+  }
+  // 마당 : 집 앞 울타리. 문(가운데)으로 사람만 드나듦, 동물은 울타리 안에서만
+  get yardRect() { return { x0: HOUSE_POS.x - 3.4, x1: HOUSE_POS.x + 3.4, z0: HOUSE_POS.z + 2.6, z1: HOUSE_POS.z + 6.4 }; } // 가로등, 벤치와 겹치지 않는 크기
+  setYard(on) {
+    if (this.yard) { this.group.remove(this.yard); for (const b of this.yardBoxes) this.boxes.splice(this.boxes.indexOf(b), 1); this.yard = null; }
+    if (!on) return;
+    const R = this.yardRect, g = new THREE.Group(), T = 0.08;
+    this.yardBoxes = [];
+    const seg = (x0, z0, x1, z1) => {
+      const len = Math.hypot(x1 - x0, z1 - z0), n = Math.max(1, Math.round(len / 0.8));
+      for (let k = 0; k <= n; k++) { const p = mesh(new THREE.BoxGeometry(0.14, 0.9, 0.14), 0xffffff); p.position.set(x0 + (x1 - x0) * k / n, 0.45, z0 + (z1 - z0) * k / n); g.add(p); }
+      for (const y of [0.35, 0.72]) { const r = mesh(new THREE.BoxGeometry(Math.abs(x1 - x0) + T, 0.07, Math.abs(z1 - z0) + T), 0xfff4e0); r.position.set((x0 + x1) / 2, y, (z0 + z1) / 2); g.add(r); }
+      this.yardBoxes.push({ x0: Math.min(x0, x1) - T, x1: Math.max(x0, x1) + T, z0: Math.min(z0, z1) - T, z1: Math.max(z0, z1) + T });
+    };
+    const gx = HOUSE_POS.x, gate = 0.9;
+    seg(R.x0, R.z0, R.x0, R.z1); seg(R.x1, R.z0, R.x1, R.z1);
+    seg(R.x0, R.z1, gx - gate, R.z1); seg(gx + gate, R.z1, R.x1, R.z1);
+    seg(R.x0, R.z0, HOUSE_POS.x - 2.7, R.z0); seg(HOUSE_POS.x + 2.7, R.z0, R.x1, R.z0);
+    const grass = mesh(new THREE.CylinderGeometry(1, 1, 0.03, 24), 0xa8e08a); grass.scale.set((R.x1 - R.x0) / 2, 1, (R.z1 - R.z0) / 2); grass.position.set((R.x0 + R.x1) / 2, 0.03, (R.z0 + R.z1) / 2); grass.userData.noOutline = true; g.add(grass);
+    const sign = makeLabel('🏡 마당', '#5a7a3a', 'rgba(255,255,255,0.9)'); sign.position.set(gx + gate + 0.6, 1.4, R.z1); sign.scale.multiplyScalar(0.7); g.add(sign);
+    outline(g, 0.02, 0x4a3048, 0.05);
+    this.group.add(g); this.yard = g;
+    this.boxes.push(...this.yardBoxes);
+  }
+
   // 친구 집 짓기와 허물기 (slot : 집 자리 번호)
   setFriendHouse(slot, colorId, name) {
     this.removeFriendHouse(slot);

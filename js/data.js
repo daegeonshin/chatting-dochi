@@ -64,6 +64,7 @@ export const FURNITURE = [
   { id: 'cushion', name: '방석', emo: '🟪' },
   { id: 'cake', name: '케이크', emo: '🎂' },
   { id: 'sapling', name: '작은 나무', emo: '🌱' },
+  { id: 'pond', name: '연못', emo: '💧' },
 ];
 export const FURN_COLORS = [0xffb3c8, 0x8fd3ff, 0xc9a7ff, 0xffd84d, 0x8fdc8f, 0xffffff, 0xc89060];
 

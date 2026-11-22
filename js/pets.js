@@ -225,6 +225,7 @@ export class Pet {
 
   moveTo(tx, tz, spd, dt, env) {
     const wp = env && env.route ? env.route(this.pos, tx, tz) : null; // 집 안 : 다른 방이면 문 앞부터
+    if (wp && wp.blocked) { this.speed *= 0.8; return true; } // 문이 닫혀 못 감
     if (wp) { tx = wp.x; tz = wp.z; }
     const dx = tx - this.pos.x, dz = tz - this.pos.z, d = Math.hypot(dx, dz);
     if (d < 0.15) { this.speed *= 0.8; return !wp; }
@@ -317,6 +318,16 @@ export class Pet {
     if (this.sub === 'carried') {
       // 품에 안김 : 위치는 main에서
       this.speed = 0;
+    } else if (this.mode === 'yard') {
+      // 마당 : 울타리 안에서만 놀기 (밖으로는 못 나감)
+      const R = this.ctx.yardRect && this.ctx.yardRect();
+      if (R) {
+        this.timer -= dt;
+        if (this.sub !== 'wander') { this.speed *= 0.85; if (this.timer <= 0) { this.target = { x: rand(R.x0 + 0.7, R.x1 - 0.7), z: rand(R.z0 + 0.7, R.z1 - 0.7) }; this.sub = 'wander'; } }
+        else if (!this.target || this.moveTo(this.target.x, this.target.z, 1.8 * slow, dt, env)) { this.sub = 'idle'; this.timer = rand(2, 6); this.target = null; if (Math.random() < 0.3) this.showIcon(['🌼', '💕', '🎵'][Math.floor(Math.random() * 3)], 1.5); }
+        this.pos.x = clamp(this.pos.x, R.x0 + 0.3, R.x1 - 0.3); this.pos.z = clamp(this.pos.z, R.z0 + 0.3, R.z1 - 0.3);
+      }
+      this.pos.y = height(this.pos.x, this.pos.z);
     } else if (this.mode === 'home') {
       const night = this.ctx.isNight && this.ctx.isNight();
       const hi = this.homeItem(home);
