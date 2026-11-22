@@ -11,7 +11,7 @@ import { makeLabel } from './utils.js';
 import { Player } from './player.js';
 import { Input, onPress } from './input.js';
 import { DayNight } from './daynight.js';
-import { House } from './house.js';
+import { House, migrateHouse, ROOM } from './house.js';
 import { Pet, makePetModel } from './pets.js';
 import { Weather, WEATHERS } from './weather.js';
 import { HomeBirds } from './homebirds.js';
@@ -28,6 +28,7 @@ import { toon, outline, makeSkyDome, GFX, setGfx } from './look.js';
 import { $, toast, openPanel, closePanel, prompt, transition, el, hexCss } from './ui.js';
 
 const S = load();
+migrateHouse(S); // 넓은 집으로 이사 (예전 가구 자리 옮김)
 if (S.room) setHouseSlot(S.room.slot); // 친구 방에서는 내 집이 방에서 맡은 자리에 있음
 const persist = () => { if (G.dn) S.clock = G.dn.serialize(); save(S); };
 
@@ -237,9 +238,9 @@ function enterHouse() {
   transition(() => {
     G.forest.remove(G.player.root);
     G.house.scene.add(G.player.root);
-    G.player.pos.set(0, 0, 3.8); G.player.yaw = Math.PI; G.player.vy = 0;
-    G.houseYaw = 0;
-    walkers().forEach((pet, i) => { pet.goHome(); pet.setScene(G.house.scene); pet.pos.set(1.2 - i * 0.8, 0, 3.6); });
+    G.player.pos.set(0, 0, ROOM.d / 2 - 1.3); G.player.yaw = Math.PI; G.player.vy = 0;
+    G.houseYaw = 0; G.houseCamReset = true;
+    walkers().forEach((pet, i) => { pet.goHome(); pet.setScene(G.house.scene); pet.pos.set(1.2 - i * 0.8, 0, ROOM.d / 2 - 1.5); });
     moveCarryTo(G.house.scene);
     G.walkPet = null;
     setMode('house');
@@ -897,7 +898,7 @@ function buildCatalog() {
   [...FURNITURE, ...PET_HOMES].forEach(f => {
     const b = el('button', 'cat-item' + (f.for ? ' pet-home' : ''), `${f.emo}<small>${f.name}</small>`);
     b.onclick = () => {
-      const s = G.house.freeSpot();
+      const s = G.house.freeSpot(G.player.pos);
       const item = G.house.addItem({ uid: uid(), id: f.id, color: furnColor, x: s.x, z: s.z, rot: 0 });
       G.house.select(item); sfx.place();
       $('deco-edit').classList.remove('hidden');
@@ -1055,8 +1056,8 @@ input.handlers.dragMove = (x, y) => {
   ray.setFromCamera(ndc, camera);
   const p = new THREE.Vector3();
   if (ray.ray.intersectPlane(floorPlane, p)) {
-    G.drag.position.x = clamp(p.x, -5.4, 5.4);
-    G.drag.position.z = clamp(p.z, -4.4, 4.2);
+    G.drag.position.x = p.x; G.drag.position.z = p.z;
+    G.house.clampItem(G.drag.position);
   }
 };
 input.handlers.dragEnd = () => {
@@ -1152,12 +1153,15 @@ function frame() {
     G.house.update(dt, night, G.weather);
     updateCarry();
     G.floatH.update(dt);
-    camTarget.set(p.pos.x * 0.5, 1, p.pos.z * 0.4 - 0.5);
-    const dist = 12.5, pitch = 0.68;
+    // 넓은 집 : 카메라가 나를 따라다니고, 가리는 벽은 흐려짐
+    const goalT = new THREE.Vector3(p.pos.x, 0.9, p.pos.z - 0.6);
+    if (G.houseCamReset) { camTarget.copy(goalT); G.houseCamReset = false; } else camTarget.lerp(goalT, 1 - Math.pow(0.001, dt));
+    const dist = G.deco ? 13 : 10.5, pitch = G.deco ? 0.95 : 0.82;
     camera.position.set(camTarget.x + Math.sin(G.houseYaw) * Math.cos(pitch) * dist, camTarget.y + Math.sin(pitch) * dist, camTarget.z + Math.cos(G.houseYaw) * Math.cos(pitch) * dist);
     camera.lookAt(camTarget);
+    G.house.fadeWalls(camera.position, p.pos, dt);
     // 문 매트에 서면 나가기
-    if (p.pos.z > 4.2 && !G.sleeping && !G.exiting) { G.exiting = true; exitHouse(); setTimeout(() => G.exiting = false, 1500); }
+    if (p.pos.z > ROOM.d / 2 - 0.5 && Math.abs(p.pos.x) < 1.6 && !G.sleeping && !G.exiting) { G.exiting = true; exitHouse(); setTimeout(() => G.exiting = false, 1500); }
     setContext('exit');
     renderer.render(G.house.scene, camera);
   }

@@ -182,7 +182,7 @@ export class HomeBirds {
           v.timer = rand(2, 6);
           v.from.copy(R.position);
           if (canFly && Math.random() < 0.6 && perches.length) { v.to.copy(pick(perches)); v.state = 'fly'; }
-          else { const s = this.house.randomSpot(); v.to.set(s.x, 0, s.z); v.state = canFly ? 'fly' : 'hop'; if (R.position.y > 0.05 && canFly) v.state = 'fly'; }
+          else { const s = canFly ? this.house.randomSpot() : this.house.randomSpot(R.position); if (!canFly && this.house.roomOf(s) !== this.house.roomOf(R.position)) { s.x = R.position.x + rand(-1, 1); s.z = R.position.z + rand(-1, 1); this.house.collide(s, 0.2); } v.to.set(s.x, 0, s.z); v.state = canFly ? 'fly' : 'hop'; if (R.position.y > 0.05 && canFly) v.state = 'fly'; }
           v.k = 0; v.dur = Math.max(0.6, v.from.distanceTo(v.to) / (v.state === 'fly' ? 4 : 0.9));
           if (b.kind === 'sparrow' && Math.random() < 0.5) sfx.tweet(0.04);
           if (b.kind === 'magpie' && Math.random() < 0.15) sfx.magpie(0.06);

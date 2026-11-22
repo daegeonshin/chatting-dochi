@@ -224,8 +224,10 @@ export class Pet {
   }
 
   moveTo(tx, tz, spd, dt, env) {
+    const wp = env && env.route ? env.route(this.pos, tx, tz) : null; // 집 안 : 다른 방이면 문 앞부터
+    if (wp) { tx = wp.x; tz = wp.z; }
     const dx = tx - this.pos.x, dz = tz - this.pos.z, d = Math.hypot(dx, dz);
-    if (d < 0.15) { this.speed *= 0.8; return true; }
+    if (d < 0.15) { this.speed *= 0.8; return !wp; }
     const s = Math.min(spd, d * 4);
     this.speed += (s - this.speed) * Math.min(1, dt * 6);
     this.yaw = angleLerp(this.yaw, Math.atan2(dx, dz), Math.min(1, dt * 8));
@@ -347,7 +349,7 @@ export class Pet {
         if (this.timer <= 0) { this.timer = 4; this.showIcon('💤', 2.5); }
       } else if (this.sub === 'inHome') {
         this.speed = 0; this.timer -= dt;
-        if (this.timer <= 0) { this.sub = 'idle'; this.timer = rand(1, 3); this.pos.y = 0; this.skipItem = null; const p = home.randomSpot(); this.target = p; this.sub = 'wander'; }
+        if (this.timer <= 0) { this.sub = 'idle'; this.timer = rand(1, 3); this.pos.y = 0; this.skipItem = null; const p = home.randomSpot(this.pos); this.target = p; this.sub = 'wander'; }
       } else if (this.sub === 'toBowl') {
         if (this.moveTo(home.bowl.x, home.bowl.z - 0.85, 2.2 * slow, dt, env)) { this.sub = 'eat'; this.timer = 3; this.yaw = 0; sfx.eat(); }
         this.pos.y = 0;
@@ -364,7 +366,7 @@ export class Pet {
           if (!sick && hi && r < 0.3) {
             const key = hi.userData.spot2 && Math.random() < 0.5 ? 'spot2' : (hi.userData.spotTop && Math.random() < 0.4 ? 'spotTop' : 'spot');
             this.homeSpot = home.spotOf(hi, key); this.skipItem = hi; this.sub = 'toHome';
-          } else if (!sick && r < 0.75) { const p = home.randomSpot(); this.target = p; this.sub = 'wander'; }
+          } else if (!sick && r < 0.75) { const p = home.randomSpot(this.pos); this.target = p; this.sub = 'wander'; }
           else { this.sub = 'idle'; this.target = null; }
           if (sick) this.showIcon('🤒', 3);
           else if (this.hungry && Math.random() < 0.5) this.showIcon('🍽️');
